@@ -3,7 +3,10 @@ ctx_mode=video_tef
 v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
-exp_id=exp
+exp_id=for_test
+
+resume=dd
+loss_type=0
 
 ######## data paths
 train_path=data/highlight_train_release.jsonl
@@ -11,7 +14,7 @@ eval_path=data/highlight_val_release.jsonl
 eval_split_name=val
 
 ######## setup video+text features
-feat_root=../features
+feat_root=features
 
 # video features
 v_feat_dim=0
@@ -51,4 +54,5 @@ PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --bsz ${bsz} \
 --results_root ${results_root} \
 --exp_id ${exp_id} \
+--loss_type ${loss_type} \
 ${@:1}

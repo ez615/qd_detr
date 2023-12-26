@@ -73,6 +73,10 @@ def train_epoch(model, criterion, train_loader, optimizer, opt, epoch_i, tb_writ
         if opt.grad_clip > 0:
             nn.utils.clip_grad_norm_(model.parameters(), opt.grad_clip)
         optimizer.step()
+
+        ### clipping temperature scaling factor
+        model.temp_scale.data = torch.clamp(model.temp_scale.data, 0, 4.6052)
+
         time_meters["model_backward_time"].update(time.time() - timer_start)
 
         loss_dict["loss_overall"] = float(losses)  # for logging only
@@ -202,15 +206,15 @@ def train(model, criterion, optimizer, lr_scheduler, train_dataset, val_dataset,
             }
             torch.save(checkpoint, opt.ckpt_filepath.replace(".ckpt", "_latest.ckpt"))
 
-        save_interval = 10 if "subs_train" in opt.train_path else 50  # smaller for pretrain
-        if (epoch_i + 1) % save_interval == 0 or (epoch_i + 1) % opt.lr_drop == 0:  # additional copies
-            checkpoint = {
-                "model": model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "epoch": epoch_i,
-                "opt": opt
-            }
-            torch.save(checkpoint, opt.ckpt_filepath.replace(".ckpt", f"_e{epoch_i:04d}.ckpt"))
+        # save_interval = 10 if "subs_train" in opt.train_path else 50  # smaller for pretrain
+        # if (epoch_i + 1) % save_interval == 0 or (epoch_i + 1) % opt.lr_drop == 0:  # additional copies
+        #     checkpoint = {
+        #         "model": model.state_dict(),
+        #         "optimizer": optimizer.state_dict(),
+        #         "epoch": epoch_i,
+        #         "opt": opt
+        #     }
+        #     torch.save(checkpoint, opt.ckpt_filepath.replace(".ckpt", f"_e{epoch_i:04d}.ckpt"))
 
         if opt.debug:
             break

@@ -21,6 +21,11 @@ class BaseOptions(object):
     def initialize(self):
         self.initialized = True
         parser = argparse.ArgumentParser()
+
+        # newly added
+        parser.add_argument("--loss_type", type=int, default=0,
+                            help='0: original loss  |  1: S_(Diff)  |  2: S_(Gt-P)  |  3: S_(Q-P)')
+
         parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum'])
         parser.add_argument("--dset_domain", type=str, choices=["BK", "BT", "DS", "FM", "GA", "MS", "PK", "PR", "VT", "VU"], 
                             help="Domain to train for tvsum dataset. (Only used for tvsum)")
@@ -187,22 +192,28 @@ class BaseOptions(object):
                 raise ValueError("--exp_id is required for at a training option!")
 
             ctx_str = opt.ctx_mode + "_sub" if any(["sub_ctx" in p for p in opt.v_feat_dirs]) else opt.ctx_mode
+            # opt.results_dir = os.path.join(opt.results_root,
+            #                                "-".join([opt.dset_name, ctx_str, opt.exp_id,
+            #                                          time.strftime("%Y_%m_%d_%H_%M_%S")]))
+            ### EDITED
             opt.results_dir = os.path.join(opt.results_root,
-                                           "-".join([opt.dset_name, ctx_str, opt.exp_id,
+                                           f'loss{opt.loss_type}',
+                                           "-".join([opt.exp_id,
                                                      time.strftime("%Y_%m_%d_%H_%M_%S")]))
             mkdirp(opt.results_dir)
-            save_fns = ['qd_detr/model.py', 'qd_detr/transformer.py']
+            save_fns = ['qd_detr/model.py', 'qd_detr/transformer.py', 'qd_detr/scripts/train.sh', 'qd_detr/span_utils.py']
             for save_fn in save_fns:
                 shutil.copyfile(save_fn, os.path.join(opt.results_dir, os.path.basename(save_fn)))
 
             # save a copy of current code
-            code_dir = os.path.dirname(os.path.realpath(__file__))
-            code_zip_filename = os.path.join(opt.results_dir, "code.zip")
-            make_zipfile(code_dir, code_zip_filename,
-                         enclosing_dir="code",
-                         exclude_dirs_substring="results",
-                         exclude_dirs=["results", "debug_results", "__pycache__"],
-                         exclude_extensions=[".pyc", ".ipynb", ".swap"], )
+            ### COMENTED
+            # code_dir = os.path.dirname(os.path.realpath(__file__))
+            # code_zip_filename = os.path.join(opt.results_dir, "code.zip")
+            # make_zipfile(code_dir, code_zip_filename,
+            #              enclosing_dir="code",
+            #              exclude_dirs_substring="results",
+            #              exclude_dirs=["results", "debug_results", "__pycache__"],
+            #              exclude_extensions=[".pyc", ".ipynb", ".swap"], )
 
         self.display_save(opt)
 

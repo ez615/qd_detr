@@ -3,15 +3,18 @@ ctx_mode=video_tef
 v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
-exp_id=pt
+exp_id=exp
+
+resume=
+loss_type=0
 
 ######## data paths
-train_path=data/subs_train.jsonl
+train_path=data/highlight_train_release.jsonl
 eval_path=data/highlight_val_release.jsonl
 eval_split_name=val
 
 ######## setup video+text features
-feat_root=features
+feat_root=../features
 
 # video features
 v_feat_dim=0
@@ -27,7 +30,7 @@ fi
 
 # text features
 if [[ ${t_feat_type} == "clip" ]]; then
-  t_feat_dir=${feat_root}/clip_sub_features/
+  t_feat_dir=${feat_root}/clip_text_features/
   t_feat_dim=512
 else
   echo "Wrong arg for t_feat_type."
@@ -35,12 +38,7 @@ else
 fi
 
 #### training
-bsz=256
-num_workers=8
-n_epoch=100
-max_es_cnt=100
-exp_id=pt
-loss_type=0
+bsz=32
 
 
 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
@@ -55,9 +53,7 @@ PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --t_feat_dim ${t_feat_dim} \
 --bsz ${bsz} \
 --results_root ${results_root} \
---num_workers ${num_workers} \
 --exp_id ${exp_id} \
---n_epoch ${n_epoch} \
---max_es_cnt ${max_es_cnt} \
+--resume ${resume} \
 --loss_type ${loss_type} \
 ${@:1}
