@@ -1,0 +1,4 @@
+python standalone_eval/eval.py \
+--submission_path /workspace/QD-DETR/results/loss0/pt-2023_12_26_08_43_26/best_hl_val_preds.jsonl \
+--gt_path /workspace/QD-DETR/data/highlight_val_release.jsonl \
+--save_path /workspace/QD-DETR/standalone_eval/evaluation/loss0_Rk_eval.json

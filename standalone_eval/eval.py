@@ -4,8 +4,10 @@ import json
 import time
 import copy
 import multiprocessing as mp
-from standalone_eval.utils import compute_average_precision_detection, \
+from utils import compute_average_precision_detection, \
     compute_temporal_iou_batch_cross, compute_temporal_iou_batch_paired, load_jsonl, get_ap
+# from standalone_eval.utils import compute_average_precision_detection, \
+#     compute_temporal_iou_batch_cross, compute_temporal_iou_batch_paired, load_jsonl, get_ap
 
 
 def compute_average_precision_detection_wrapper(
@@ -95,6 +97,49 @@ def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10))
         iou_thd2recall_at_one[str(thd)] = float(f"{np.mean(pred_gt_iou >= thd) * 100:.2f}")
     return iou_thd2recall_at_one
 
+### ADDED
+def compute_mr_rk(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10), k=3):
+    """If a predicted segment has IoU >= iou_thd with one of the 1st GT segment, we define it positive"""
+
+    iou_thds = [float(f"{e:.2f}") for e in iou_thds]
+    # pred_qid2window = {d["qid"]: d["pred_relevant_windows"][:k][:2] for d in submission}  # :2 rm scores
+    # gt_qid2window = {d["qid"]: d["relevant_windows"][0] for d in ground_truth}
+    gt_qid2window = {}
+    pred_qid2window = {}
+    for g, s in zip(ground_truth, submission):
+        cur_gt_windows = g["relevant_windows"]
+        cur_pred_windows = [x[:2] for x in s["pred_relevant_windows"][:k]]
+        # print(f"cur_gt_windows: {cur_gt_windows}\ncur_pred_windows: {cur_pred_windows}")
+
+        cur_qid = g["qid"]
+        cur_max_iou_idx = 0
+        cur_max_iou = 0
+
+        if len(cur_gt_windows) > 0:  # select the GT window that has the highest IoU
+            for i in range(k):
+                cur_ious = compute_temporal_iou_batch_cross(
+                    np.array([cur_pred_windows[i]]), np.array(g["relevant_windows"])
+                )[0][0]
+                cur_max_iou_idx = np.argmax(cur_ious)
+
+                if cur_max_iou <= cur_ious[cur_max_iou_idx]:
+                    gt_qid2window[cur_qid] = cur_gt_windows[cur_max_iou_idx]
+                    pred_qid2window[cur_qid] = cur_pred_windows[i]
+                    cur_max_iou = max(cur_ious)
+            # print(f'pred_qid2window[cur_qid]: {pred_qid2window[cur_qid]}')
+
+    qids = list(pred_qid2window.keys())
+    pred_windows = np.array([pred_qid2window[k] for k in qids]).astype(float)
+    gt_windows = np.array([gt_qid2window[k] for k in qids]).astype(float)
+    
+    pred_gt_iou = compute_temporal_iou_batch_paired(pred_windows, gt_windows)
+    
+    iou_thd2recall_at_k = {}
+    for thd in iou_thds:
+        iou_thd2recall_at_k[str(thd)] = float(f"{np.mean(pred_gt_iou >= thd) * 100:.2f}")
+
+    return iou_thd2recall_at_k
+
 
 def get_window_len(window):
     return window[1] - window[0]
@@ -146,7 +191,12 @@ def eval_moment_retrieval(submission, ground_truth, verbose=True):
               f"{100*len(_ground_truth)/len(ground_truth):.2f} examples.")
         iou_thd2average_precision = compute_mr_ap(_submission, _ground_truth, num_workers=8, chunksize=50)
         iou_thd2recall_at_one = compute_mr_r1(_submission, _ground_truth)
-        ret_metrics[name] = {"MR-mAP": iou_thd2average_precision, "MR-R1": iou_thd2recall_at_one}
+        ### ADDED
+        iou_thd2recall_at_k = compute_mr_rk(_submission, _ground_truth, k=3) 
+
+        # ret_metrics[name] = {"MR-mAP": iou_thd2average_precision, "MR-R1": iou_thd2recall_at_one}
+        ### EDTIED
+        ret_metrics[name] = {"MR-mAP": iou_thd2average_precision, "MR-R1": iou_thd2recall_at_one, "MR-R3": iou_thd2recall_at_k}
         if verbose:
             print(f"[eval_moment_retrieval] [{name}] {time.time() - start_time:.2f} seconds")
     return ret_metrics
@@ -300,6 +350,8 @@ def eval_submission(submission, ground_truth, verbose=True, match_number=True):
             "MR-long-mAP": moment_ret_scores["long"]["MR-mAP"]["average"],
             "MR-full-R1@0.5": moment_ret_scores["full"]["MR-R1"]["0.5"],
             "MR-full-R1@0.7": moment_ret_scores["full"]["MR-R1"]["0.7"],
+            "MR-full-R3@0.5": moment_ret_scores["full"]["MR-R3"]["0.5"],
+            "MR-full-R3@0.7": moment_ret_scores["full"]["MR-R3"]["0.7"],
         }
         eval_metrics_brief.update(
             sorted([(k, v) for k, v in moment_ret_scores_brief.items()], key=lambda x: x[0]))
@@ -321,22 +373,38 @@ def eval_submission(submission, ground_truth, verbose=True, match_number=True):
 
 
 def eval_main():
+    ### EDITED
     import argparse
+    from glob import glob
+    import os
     parser = argparse.ArgumentParser(description="Moments and Highlights Evaluation Script")
-    parser.add_argument("--submission_path", type=str, help="path to generated prediction file")
-    parser.add_argument("--gt_path", type=str, help="path to GT file")
-    parser.add_argument("--save_path", type=str, help="path to save the results")
+    # parser.add_argument("--submission_path", type=str, help="path to generated prediction file")
+    parser.add_argument("--loss", required=True ,type=str, help="the type of loss")
+    parser.add_argument("--exp", required=True ,type=str, help="the name of experiment")
+    parser.add_argument("--gt_path", default="/workspace/QD-DETR/data/highlight_val_release.jsonl", type=str, help="path to GT file")
+    # parser.add_argument("--save_path", type=str, help="path to save the results")
     parser.add_argument("--not_verbose", action="store_true")
     args = parser.parse_args()
 
     verbose = not args.not_verbose
-    submission = load_jsonl(args.submission_path)
+
+    submission_path = glob(os.path.join('/workspace/QD-DETR/results', 
+                                        'loss' + args.loss,
+                                        args.exp + '*'))
+    
+    print(f'submission_path: {submission_path}')
+    if len(submission_path) != 1:
+        print('Please give more specific exp name!')
+        exit(1)
+
+    submission = load_jsonl(submission_path[0] + '/best_hl_val_preds.jsonl')
     gt = load_jsonl(args.gt_path)
     results = eval_submission(submission, gt, verbose=verbose)
     if verbose:
         print(json.dumps(results, indent=4))
 
-    with open(args.save_path, "w") as f:
+    save_path = '/workspace/QD-DETR/standalone_eval/evaluation/' + ('_').join(['loss' + args.loss, args.exp]) + '.json'
+    with open(save_path, "w") as f:
         f.write(json.dumps(results, indent=4))
 
 

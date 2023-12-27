@@ -6,7 +6,7 @@ results_root=results
 exp_id=ft
 
 resume=/workspace/QD-DETR/results/loss0/pt-2023_12_26_08_43_26/model_best.ckpt
-loss_type=1
+loss_type=0
 
 ######## data paths
 train_path=data/highlight_train_release.jsonl
