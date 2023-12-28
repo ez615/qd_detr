@@ -232,7 +232,7 @@ class SetCriterion(nn.Module):
     """
 
     def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, max_v_l,
-                 saliency_margin=1, iou_loss_type=0, use_matcher=True):
+                 saliency_margin=1, iou_loss_type=0, use_matcher=True, diou=False):
         """ Create the criterion.
         Parameters:
             matcher: module able to compute a matching between targets and proposals
@@ -252,6 +252,8 @@ class SetCriterion(nn.Module):
         self.span_loss_type = span_loss_type
         ### ADDED
         self.iou_loss_type = iou_loss_type
+        self.diou = diou
+
         self.max_v_l = max_v_l
         self.saliency_margin = saliency_margin
 
@@ -283,7 +285,7 @@ class SetCriterion(nn.Module):
             if self.iou_loss_type == 0:
                 loss_giou = 1 - torch.diag(generalized_temporal_iou(span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans)))
             else:
-                loss_giou = new_loss(self.iou_loss_type, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                loss_giou = new_loss(self.iou_loss_type, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0], self.diou)
 
         else:  # ce
             n_spans = src_spans.shape[0]
@@ -623,6 +625,7 @@ def build_model(args):
         eos_coef=args.eos_coef, temperature=args.temperature,
         span_loss_type=args.span_loss_type, iou_loss_type=args.loss_type, max_v_l=args.max_v_l,
         saliency_margin=args.saliency_margin, use_matcher=use_matcher,
+        diou=args.diou
     )
     criterion.to(device)
     return model, criterion

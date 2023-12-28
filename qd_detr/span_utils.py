@@ -261,18 +261,25 @@ def S_Q_P(iou, spans, logits, idx):  # S(Q-P)
 
     return new_iou
 
-def new_loss(iou_loss_type, spans1, spans2, sims, idx):
+def distance_term(spans1, spans2):
+    left = torch.min(spans1[:, None, 0], spans2[:, 0])  # (N, M)
+    right = torch.max(spans1[:, None, 1], spans2[:, 1])  # (N, M)
+    
+    enclosing_area = torch.diag((right - left).clamp(min=0))  # (N, M)
+
+    center1 = torch.diag((spans1[:, None, 0] + spans1[:, None, 1]) / 2)
+    center2 = (spans2[:, 0] + spans2[:, 1]) / 2
+    center_dist = (center2 - center1) ** 2
+
+    distance = center_dist / (enclosing_area ** 2)
+
+    return distance
+
+def new_loss(iou_loss_type, spans1, spans2, sims, idx, diou=False):
     spans1 = spans1.float()
     spans2 = spans2.float()
 
     iou, _ = temporal_iou(spans1, spans2)
-
-    left = torch.min(spans1[:, None, 0], spans2[:, 0])  # (N, M)
-    right = torch.max(spans1[:, None, 1], spans2[:, 1])  # (N, M)
-    
-    # enclosing_area = (right - left).clamp(min=0)  # (N, M)
-
-    # distance = (enclosing_area - union) / enclosing_area
 
     vid_clip_len = sims.shape[1]
     
@@ -288,10 +295,19 @@ def new_loss(iou_loss_type, spans1, spans2, sims, idx):
     assert (spans2[:, 1] >= spans2[:, 0]).all()
 
     if iou_loss_type == 1:
-        return 1 - S_Diff(iou, spans1, spans2, sims, idx)
+        new_loss = 1 - S_Diff(iou, spans1, spans2, sims, idx)
 
     elif iou_loss_type == 2:
-        return 1 - S_GT_P(iou,spans1, spans2, sims, idx) 
+        new_loss = 1 - S_GT_P(iou,spans1, spans2, sims, idx) 
     
     elif iou_loss_type == 3:
-        return 1 - S_Q_P(iou, spans1, sims, idx)
+        new_loss = 1 - S_Q_P(iou, spans1, sims, idx)
+
+    if diou:
+        distance = distance_term(spans1, spans2)
+        # print(f'distance: {distance}')
+        # print(f'before new_loss: {new_loss}')
+        new_loss += distance
+        # print(f'after new_loss: {new_loss}')
+
+    return new_loss
