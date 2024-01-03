@@ -26,6 +26,8 @@ class BaseOptions(object):
         parser.add_argument("--loss_type", type=int, default=0,
                             help='0: original loss  |  1: S_(Diff)  |  2: S_(Gt-P)  |  3: S_(Q-P)')
         parser.add_argument("--diou", action="store_true")
+        parser.add_argument("--scheduling", action="store_true")
+
 
         parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum'])
         parser.add_argument("--dset_domain", type=str, choices=["BK", "BT", "DS", "FM", "GA", "MS", "PK", "PR", "VT", "VU"], 

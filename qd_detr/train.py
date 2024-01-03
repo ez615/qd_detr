@@ -188,6 +188,10 @@ def train(model, criterion, optimizer, lr_scheduler, train_dataset, val_dataset,
                 for src, tgt in zip(latest_file_paths, best_file_paths):
                     os.renames(src, tgt)
                 logger.info("The checkpoint file has been updated.")
+
+                ### ADDED
+                with open(opt.train_log_filepath, "a") as f:
+                    f.write(f"The checkpoint file has been updated at epoch {epoch_i}\n")
             else:
                 es_cnt += 1
                 if opt.max_es_cnt != -1 and es_cnt > opt.max_es_cnt:  # early stop
@@ -296,6 +300,10 @@ def train_hl(model, criterion, optimizer, lr_scheduler, train_dataset, val_datas
                 for src, tgt in zip(latest_file_paths, best_file_paths):
                     os.renames(src, tgt)
                 logger.info("The checkpoint file has been updated.")
+
+                ### ADDED
+                with open(opt.train_log_filepath, "a") as f:
+                    f.write(f"The checkpoint file has been updated at epoch {epoch_i}\n")
             else:
                 es_cnt += 1
                 if opt.max_es_cnt != -1 and es_cnt > opt.max_es_cnt:  # early stop
