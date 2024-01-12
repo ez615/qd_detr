@@ -4,10 +4,10 @@ v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
 
-exp_id=for_test_re
+exp_id=no_pt_re
 
 resume=/workspace/QD-DETR/results/loss0/pt-2023_12_26_08_43_26/model_best.ckpt
-loss_type=0
+loss_type=1
 scheduling=0
 
 ######## data paths

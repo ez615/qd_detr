@@ -4,11 +4,10 @@ v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
 
-exp_id=for_test_re
+exp_id=no_pt_re
 
 resume=/workspace/QD-DETR/results/loss0/pt-2023_12_26_08_43_26/model_best.ckpt
 loss_type=0
-scheduling=0
 
 ######## data paths
 train_path=data/highlight_train_release.jsonl
@@ -57,5 +56,4 @@ PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --results_root ${results_root} \
 --exp_id ${exp_id} \
 --loss_type ${loss_type} \
---scheduling ${scheduling} \
 ${@:1}

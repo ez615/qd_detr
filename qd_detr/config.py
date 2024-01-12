@@ -26,7 +26,12 @@ class BaseOptions(object):
         parser.add_argument("--loss_type", type=int, default=0,
                             help='0: original loss  |  1: S_(Diff)  |  2: S_(Gt-P)  |  3: S_(Q-P)')
         parser.add_argument("--diou", action="store_true")
-        parser.add_argument("--scheduling", action="store_true")
+        parser.add_argument("--sim_loss_coef", default=1, type=float)
+        parser.add_argument("--scheduling", type=int, default=0,
+                            help='version of scheduling \
+                                0: no sched  |  1: linear seperate  |  2: linear both')
+        parser.add_argument("--total_iou_loss_coef", default=1, type=float,
+                            help='during loss scheduling, coeff of sum of sim loss and giou loss')
 
 
         parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum'])

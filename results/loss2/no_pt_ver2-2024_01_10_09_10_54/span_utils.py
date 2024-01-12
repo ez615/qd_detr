@@ -306,12 +306,15 @@ def distance_term(spans1, spans2):
 
     return distance
 
-def new_loss(iou_loss_types, spans1, spans2, sims, idx):
+def new_loss(iou_loss_types, spans1, spans2, sims, idx, scheduling=False):
     spans1 = spans1.float()
     spans2 = spans2.float()
 
     iou, _ = temporal_iou(spans1, spans2)
     iou = torch.diag(iou)
+
+    if scheduling:
+        giou = torch.diag(generalized_temporal_iou(spans1, spans2))
 
     if not 2 in iou_loss_types:
         sims = sims[0]
@@ -339,11 +342,16 @@ def new_loss(iou_loss_types, spans1, spans2, sims, idx):
 
     new_loss = 1 - iou
 
+    c_g, c_s = 1, 1
+
     if 1 in iou_loss_types:
-        new_loss += S_Diff(iou, spans1, spans2, sims, idx)
+        if scheduling:
+            new_loss = new_loss + c_g * giou + c_s * S_Diff
+        else:
+            new_loss += S_Diff(iou, spans1, spans2, sims, idx)
 
     if 2 in iou_loss_types:
-        new_loss += S_GT_P(iou,spans1, spans2, vid_feat, idx) 
+        new_loss += S_GT_P_2(iou,spans1, spans2, vid_feat, idx) 
     
     if 3 in iou_loss_types:
         new_loss += S_Q_P(iou, spans1, sims, idx)

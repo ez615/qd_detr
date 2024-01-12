@@ -182,6 +182,11 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
     write_tb = tb_writer is not None and epoch_i is not None
 
     mr_res = []
+
+    ### ADDED
+    giou_coeffs = np.arange(0, 1.1, 0.1)  # linear: [0.  0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 1. ]
+    sim_coeffs = np.flip(giou_coeffs)
+
     for batch in tqdm(eval_loader, desc="compute st ed scores"):
         query_meta = batch[0]
         if opt.a_feat_dir is None:
@@ -228,6 +233,40 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
         if criterion:
             loss_dict = criterion(outputs, targets)
             weight_dict = criterion.weight_dict
+
+            ### ADDED
+            if opt.scheduling and epoch_i is not None:
+                coef_idx = epoch_i // 20
+
+            if opt.scheduling == 1:
+                loss_dict['loss_sim'] = sim_coeffs[coef_idx] * loss_dict['loss_sim']
+                loss_dict['loss_giou'] = giou_coeffs[coef_idx] * loss_dict['loss_giou']
+
+                for i in range(opt.dec_layers - 1):
+                    loss_dict[f'loss_sim_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}']
+                    loss_dict[f'loss_giou_{i}'] = giou_coeffs[coef_idx] * loss_dict[f'loss_giou_{i}']
+
+
+            elif opt.scheduling == 2:
+                loss_dict["loss_total_iou"] = sim_coeffs[coef_idx] * loss_dict['loss_sim'] + giou_coeffs[coef_idx] * loss_dict['loss_giou']
+
+                loss_meters['loss_sim'].update(loss_dict['loss_sim'])  ### for logging
+                loss_meters['loss_giou'].update(loss_dict['loss_giou'])   ### for logging
+
+                del loss_dict['loss_sim']
+                del loss_dict['loss_giou']
+
+                for i in range(opt.dec_layers - 1):
+                    loss_dict[f'loss_total_iou_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}'] + giou_coeffs[coef_idx] * loss_dict[f'loss_giou_{i}']
+
+                    del loss_dict[f'loss_sim_{i}']
+                    del loss_dict[f'loss_giou_{i}']
+                
+            ### for logging
+            if epoch_i % 20 == 0 and batch_idx == 0:
+                with open(opt.train_log_filepath, "a") as f:
+                    f.write(f"weight_dict['loss_sim']: {sim_coeffs[coef_idx]}\tweight_dict['loss_giou']: {giou_coeffs[coef_idx]}\n")
+
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
             loss_dict["loss_overall"] = float(losses)  # for logging only
             for k, v in loss_dict.items():

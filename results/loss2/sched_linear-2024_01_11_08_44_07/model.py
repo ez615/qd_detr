@@ -246,7 +246,7 @@ class SetCriterion(nn.Module):
     """
 
     def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, max_v_l,
-                 saliency_margin=1, iou_loss_type=0, use_matcher=True, diou=False, scheduling=0):
+                 saliency_margin=1, iou_loss_type=0, use_matcher=True, diou=False, scheduling=False):
         """ Create the criterion.
         Parameters:
             matcher: module able to compute a matching between targets and proposals
@@ -311,9 +311,7 @@ class SetCriterion(nn.Module):
                 if self.scheduling:
                     loss_giou = 1 - torch.diag(generalized_temporal_iou(span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans)))
                     losses['loss_giou'] = loss_giou.mean()
-
-                    # if self.scheduling == 2:
-                    #     losses['loss_total_iou'] = None  ### initialize
+                    losses['loss_total_iou'] = None  ### initialize
 
         else:  # ce
             n_spans = src_spans.shape[0]
@@ -627,24 +625,22 @@ def build_model(args):
 
     matcher = build_matcher(args)
     ### EDITED
-    weight_dict = {"loss_span": args.span_loss_coef,
-                   "loss_giou": args.giou_loss_coef,
-                   "loss_sim": args.sim_loss_coef,
-                   "loss_label": args.label_loss_coef,
-                   "loss_saliency": args.lw_saliency,
-                   "loss_total_iou": args.total_iou_loss_coef}
     # weight_dict = {"loss_span": args.span_loss_coef,
+    #                "loss_giou": args.giou_loss_coef,
+    #                "loss_sim": args.sim_loss_coef,
     #                "loss_label": args.label_loss_coef,
     #                "loss_saliency": args.lw_saliency}
+    weight_dict = {"loss_span": args.span_loss_coef,
+                   "loss_label": args.label_loss_coef,
+                   "loss_saliency": args.lw_saliency}
     
-    # if args.loss_type == 0:
-    #     weight_dict["loss_giou"] = args.giou_loss_coef
-    # else:
-    #     weight_dict["loss_sim"] = args.sim_loss_coef
-        
-        # if args.scheduling:
-        #     weight_dict["loss_giou"] = args.giou_loss_coef    
-        #     weight_dict["loss_total_iou"] = args.total_iou_loss_coef
+    if args.loss_type == 0:
+        weight_dict["loss_giou"] = args.giou_loss_coef
+    else:
+        weight_dict["loss_sim"] = args.sim_loss_coef
+        if args.scheduling:
+            weight_dict["loss_giou"] = args.giou_loss_coef
+            weight_dict["loss_total_iou"] = args.total_iou_loss
         
 
     if args.contrastive_align_loss:

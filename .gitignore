@@ -16,7 +16,7 @@ data/
 run_on_video/
 latest_hl*
 inference_hl*
-evaluation/**/visualize
+visualize/
 
 # compiled files #
 *.pyc
