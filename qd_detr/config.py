@@ -23,7 +23,7 @@ class BaseOptions(object):
         parser = argparse.ArgumentParser()
 
         # newly added
-        parser.add_argument("--loss_type", type=int, default=0,
+        parser.add_argument("--loss_type", type=str, default=0,
                             help='0: original loss  |  1: S_(Diff)  |  2: S_(Gt-P)  |  3: S_(Q-P)')
         parser.add_argument("--diou", action="store_true")
         parser.add_argument("--sim_loss_coef", default=1, type=float)
@@ -209,7 +209,7 @@ class BaseOptions(object):
                                            "-".join([opt.exp_id,
                                                      time.strftime("%Y_%m_%d_%H_%M_%S")]))
             mkdirp(opt.results_dir)
-            save_fns = ['qd_detr/model.py', 'qd_detr/transformer.py', 'qd_detr/scripts/train.sh', 'qd_detr/span_utils.py']
+            save_fns = ['qd_detr/model.py', 'qd_detr/transformer.py', 'qd_detr/train.py', 'qd_detr/span_utils.py']
             for save_fn in save_fns:
                 shutil.copyfile(save_fn, os.path.join(opt.results_dir, os.path.basename(save_fn)))
 

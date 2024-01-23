@@ -4,6 +4,7 @@ import numpy as np
 import os
 from collections import OrderedDict, defaultdict
 from utils.basic_utils import AverageMeter
+import math
 
 import torch
 import torch.nn.functional as F
@@ -238,34 +239,50 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
             if opt.scheduling and epoch_i is not None:
                 coef_idx = epoch_i // 20
 
-            if opt.scheduling == 1:
-                loss_dict['loss_sim'] = sim_coeffs[coef_idx] * loss_dict['loss_sim']
-                loss_dict['loss_giou'] = giou_coeffs[coef_idx] * loss_dict['loss_giou']
+                if opt.scheduling == 1:
+                    loss_dict['loss_sim'] = sim_coeffs[coef_idx] * loss_dict['loss_sim']
+                    loss_dict['loss_giou'] = giou_coeffs[coef_idx] * loss_dict['loss_giou']
 
-                for i in range(opt.dec_layers - 1):
-                    loss_dict[f'loss_sim_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}']
-                    loss_dict[f'loss_giou_{i}'] = giou_coeffs[coef_idx] * loss_dict[f'loss_giou_{i}']
+                    for i in range(opt.dec_layers - 1):
+                        loss_dict[f'loss_sim_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}']
+                        loss_dict[f'loss_giou_{i}'] = giou_coeffs[coef_idx] * loss_dict[f'loss_giou_{i}']
 
+                ### sim + giou non-linear
+                elif opt.scheduling == 2:  
+                    ### cos DF cross
+                    weight_dict['loss_sim'] = (1 + math.cos(epoch_i * math.pi / opt.n_epoch)) / 2  
+                    weight_dict['loss_giou'] = (1 - math.cos(epoch_i * math.pi / opt.n_epoch)) / 2
 
-            elif opt.scheduling == 2:
-                loss_dict["loss_total_iou"] = sim_coeffs[coef_idx] * loss_dict['loss_sim'] + giou_coeffs[coef_idx] * loss_dict['loss_giou']
+                    ### inverse sqrt DF cross
+                    # weight_dict['loss_sim'] = 1 / math.sqrt(epoch_i + 1)
+                    # weight_dict['loss_giou'] = 1 - (1 / math.sqrt(epoch_i + 1))
 
-                loss_meters['loss_sim'].update(loss_dict['loss_sim'])  ### for logging
-                loss_meters['loss_giou'].update(loss_dict['loss_giou'])   ### for logging
+                    ### sigmoid DF cross
+                    # weight_dict['loss_sim'] = 1 / (1 + np.exp(epoch_i - opt.n_epoch / 2))
+                    # weight_dict['loss_giou'] = 1 / (1 + np.exp(-epoch_i + opt.n_epoch / 2))
 
-                del loss_dict['loss_sim']
-                del loss_dict['loss_giou']
+                    for i in range(opt.dec_layers - 1):
+                        ### cos DF cross
+                        weight_dict[f'loss_sim_{i}'] = (1 + math.cos(epoch_i * math.pi / opt.n_epoch)) / 2  
+                        weight_dict[f'loss_giou_{i}'] = (1 - math.cos(epoch_i * math.pi / opt.n_epoch)) / 2
 
-                for i in range(opt.dec_layers - 1):
-                    loss_dict[f'loss_total_iou_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}'] + giou_coeffs[coef_idx] * loss_dict[f'loss_giou_{i}']
+                        ### inverse sqrt DF cross
+                        # weight_dict[f'loss_sim_{i}'] = 1 / math.sqrt(epoch_i + 1)  
+                        # weight_dict[f'loss_giou_{i}'] = 1 - (1 / math.sqrt(epoch_i + 1))
 
-                    del loss_dict[f'loss_sim_{i}']
-                    del loss_dict[f'loss_giou_{i}']
+                        ### sigmoid DF cross
+                        # weight_dict[f'loss_sim_{i}'] = 1 / (1 + np.exp(epoch_i - opt.n_epoch / 2))
+                        # weight_dict[f'loss_giou_{i}'] = 1 / (1 + np.exp(-epoch_i + opt.n_epoch / 2))
+
+                elif opt.scheduling == 3:  # sim + sim sched
+
+                    loss_dict['loss_sim'] = sim_coeffs[coef_idx] * loss_dict['loss_sim']
+                    loss_dict['loss_sim2'] = giou_coeffs[coef_idx] * loss_dict['loss_sim2']
+
+                    for i in range(opt.dec_layers - 1):
+                        loss_dict[f'loss_sim_{i}'] = sim_coeffs[coef_idx] * loss_dict[f'loss_sim_{i}']
+                        loss_dict[f'loss_sim2_{i}'] = giou_coeffs[coef_idx] * loss_dict[f'loss_sim2_{i}']
                 
-            ### for logging
-            if epoch_i % 20 == 0 and batch_idx == 0:
-                with open(opt.train_log_filepath, "a") as f:
-                    f.write(f"weight_dict['loss_sim']: {sim_coeffs[coef_idx]}\tweight_dict['loss_giou']: {giou_coeffs[coef_idx]}\n")
 
             losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
             loss_dict["loss_overall"] = float(losses)  # for logging only

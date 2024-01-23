@@ -1,6 +1,7 @@
 import os
 import json
 from glob import glob
+import math
 import numpy as np
 from collections import OrderedDict, defaultdict
 import multiprocessing as mp
@@ -171,80 +172,99 @@ def video_visualization(submission, gt, save_dir, exp_name):
 
     ct = 0
     for d in tqdm(pred_gt_iou):
-        if d['iou'] == 0.0:
+        pred_st, pred_end = window2clips(d['pred_wds'])
+        gt_st, gt_end = window2clips(d['gt_wds'])
+
+        pred_frames, gt_frames = video_loader.extract_clips(video_path=f'../val/{d["vid"]}.mp4', 
+                                pred_st=pred_st, pred_end=pred_end, gt_st=gt_st, gt_end=gt_end)
+
+        pred_len, gt_len = len(pred_frames), len(gt_frames)
+        max_len = max(pred_len, gt_len)
+
+        n_rows, n_cols = gt_len // 10 + pred_len // 10 + 2, min(10, max_len)
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+        fig.suptitle(f'query: {d["query"]}')
+        for axis in axes.flatten():
+            axis.axis('off')
+
+        for i in range(gt_len):
+            r = i // n_cols
+            c = i % n_cols
+            if i == 0:
+                axes[r][c].set_title(f'Ground Truth {gt_st + i}', fontsize=6)
+            else:
+                axes[r][c].set_title(f'{gt_st + i}', fontsize=6)
+            axes[r][c].imshow(gt_frames[i])
+            # axes[r][c].axis('off')
+
+        for i in range(pred_len):
+            r = i // n_cols + gt_len // 10 + 1
+            c = i % n_cols
+            if i == 0:
+                axes[r][c].set_title(f'Prediction {pred_st + i}', fontsize=6)
+            else:
+                axes[r][c].set_title(f'{pred_st + i}', fontsize=6)
+            axes[r][c].imshow(pred_frames[i])
+            # axes[r][c].axis('off')
+
+        fig.savefig(f'./{save_dir}/visualize/{exp_name}/{d["iou"]}_{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
+        ct += 1
+
+        # if ct >= 20:
+        #     break
+
+def video_visualization_full(submission, gt, save_dir):
+    print(f"Start submission visualization")
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    print(f'>> save path: {save_dir}')
+
+    pred_gt_iou = compute_mr_r1(submission, gt)
+
+    video_loader = VideoLoader(framerate=1/2, size=224, centercrop=True)
+
+    ct = 0
+    for d in tqdm(pred_gt_iou):
+        if d['iou'] == 0 or d['iou'] > 0.8:
+            vid_path = os.path.join("/workspace/val", d['vid'] + ".mp4")
+            video_frames = video_loader.read_video_from_file(video_path=vid_path)
+            video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
+
+            vid_len = len(video_frames)
             pred_st, pred_end = window2clips(d['pred_wds'])
             gt_st, gt_end = window2clips(d['gt_wds'])
 
-            pred_frames, gt_frames = video_loader.extract_clips(video_path=f'../val/{d["vid"]}.mp4', 
-                                    pred_st=pred_st, pred_end=pred_end, gt_st=gt_st, gt_end=gt_end)
-
-            pred_len, gt_len = len(pred_frames), len(gt_frames)
-            max_len = max(pred_len, gt_len)
-
-            n_rows, n_cols = gt_len // 10 + pred_len // 10 + 2, min(10, max_len)
-            
+            n_rows, n_cols = 5, 15
             fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
-            fig.suptitle(f'query: {d["query"]}')
+            
+            fig.suptitle(f'Query: {d["query"]}')
+
             for axis in axes.flatten():
                 axis.axis('off')
-
-            for i in range(gt_len):
+            
+            for i in range(vid_len):
                 r = i // n_cols
                 c = i % n_cols
-                if i == 0:
-                    axes[r][c].set_title(f'Ground Truth {gt_st + i}', fontsize=6)
-                else:
-                    axes[r][c].set_title(f'{gt_st + i}', fontsize=6)
-                axes[r][c].imshow(gt_frames[i])
-                # axes[r][c].axis('off')
 
-            for i in range(pred_len):
-                r = i // n_cols + gt_len // 10 + 1
-                c = i % n_cols
-                if i == 0:
-                    axes[r][c].set_title(f'Prediction {pred_st + i}', fontsize=6)
+                axes[r][c].set_title(str(i), fontsize=6)
+                if gt_st <= i <= gt_end:
+                    axes[r][c].text(0, 0, 'GT', fontsize=6, color='green')
+                    axes[r][c].imshow(video_frames[i])
+                
+                if pred_st <= i <= pred_end:
+                    axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
+                    axes[r][c].imshow(video_frames[i])
+                
                 else:
-                    axes[r][c].set_title(f'{pred_st + i}', fontsize=6)
-                axes[r][c].imshow(pred_frames[i])
-                # axes[r][c].axis('off')
-
-            # fig.subplots_adjust(hspace=0.01, wspace=0)
-            fig.savefig(f'./{save_dir}/visualize/{exp_name}/{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
+                    axes[r][c].imshow(video_frames[i], alpha=0.6)
+            
+            fig.savefig(f'{save_dir}/{d["iou"]}_{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
             plt.close()
-            ct += 1
-        if ct >= 20:
-            break
 
-        # elif d['iou'] == 1.0:
-        #     gt_st, gt_end = window2clips(d['gt_wds'])
-
-        #     _, gt_frames = video_loader.extract_clips(video_path=f'../val/{d["vid"]}.mp4', 
-        #                             pred_st=gt_st, pred_end=gt_end, gt_st=gt_st, gt_end=gt_end)
-
-        #     gt_len = len(gt_frames)
-
-        #     n_rows, n_cols = gt_len // 10 + 2, min(10, gt_len)
-        #     # print('n_rows, n_cols', n_rows, n_cols)
-        #     fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
-        #     fig.suptitle(f'query: {d["query"]}')
-        #     for axis in axes.flatten():
-        #         axis.axis('off')
-        #         if axis.is_last_row():
-        #             axis.remove()
-
-        #     for i in range(gt_len):
-        #         r = i // n_cols
-        #         c = i % n_cols
-
-        #         if i == 0:
-        #             axes[r][c].set_title(f'Ground Truth {gt_st + i}', fontsize=6)
-        #         else:
-        #             axes[r][c].set_title(f'{gt_st + i}', fontsize=6)
-        #         axes[r][c].imshow(gt_frames[i])
-
-
-        #     fig.savefig(f'../vis_MDETR_1/{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
-        #     plt.close()
 
 def similar_clip_eval(threshold=0.9):
     opt = BaseOptions().parse()
@@ -337,6 +357,16 @@ def similar_clip_eval(threshold=0.9):
     plt.close()
 
 def compare_result(baseline, compare, gt, save_dir):
+    print(f"Start compare submission to baseline and visualize")
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+        # os.mkdir(save_dir + '/same')
+        os.mkdir(save_dir + '/dec')
+        os.mkdir(save_dir + '/inc')
+
+        print(f'>> save path: {save_dir}')
+
     baseline = compute_mr_r1(baseline, gt)
     compare = compute_mr_r1(compare, gt)
 
@@ -402,7 +432,8 @@ def compare_result(baseline, compare, gt, save_dir):
         delta = c['iou'] - b['iou']
 
         if delta == 0:
-            compare_visualize('same', delta)
+            # compare_visualize('same', delta)
+            continue
         elif delta > 0:
             compare_visualize('inc', delta)
         else:
@@ -411,7 +442,7 @@ def compare_result(baseline, compare, gt, save_dir):
         
 if __name__ == "__main__":
     gt_path = '/workspace/QD-DETR/data/highlight_val_release.jsonl'
-    submission_path = '/workspace/QD-DETR/results/loss2/no_pt_2-2024_01_03_02_12_55/best_hl_val_preds.jsonl'
+    submission_path = '/workspace/QD-DETR/results/loss0/no_pt_re-2024_01_11_08_44_41/best_hl_val_preds.jsonl'
 
     submission = load_jsonl(submission_path)
     gt = load_jsonl(gt_path)
@@ -422,8 +453,11 @@ if __name__ == "__main__":
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
     
-    result_evaluation(submission, gt, save_dir, exp_name)
-    # video_visualization(submission, gt, save_dir, exp_name)
+    # result_evaluation(submission, gt, save_dir, exp_name)
+
+    save_dir = os.path.join('visualize', submission_path.split('/')[4], exp_name)
+
+    # video_visualization_full(submission, gt, save_dir + '/submission')
     # similar_clip_eval(0.6)
     # similar_clip_eval(0.8)
     # similar_clip_eval(0.9)
@@ -431,11 +465,4 @@ if __name__ == "__main__":
     baseline_path = '/workspace/QD-DETR/results/loss0/no_pt-2023_12_26_08_49_07/best_hl_val_preds.jsonl'
     baseline = load_jsonl(baseline_path)
 
-    save_dir = os.path.join('visualize', submission_path.split('/')[4], exp_name)
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-        os.mkdir(save_dir + '/same')
-        os.mkdir(save_dir + '/dec')
-        os.mkdir(save_dir + '/inc')
-
-    compare_result(baseline, submission, gt, save_dir)
+    compare_result(baseline, submission, gt, save_dir + '/compare')
