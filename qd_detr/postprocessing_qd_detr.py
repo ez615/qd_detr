@@ -25,16 +25,23 @@ class PostProcessorDETR:
 
     def __call__(self, lines):
         processed_lines = []
-        for line in tqdm(lines, desc=f"convert to multiples of clip_length={self.clip_length}"):
+        for line in lines:
             windows_and_scores = torch.tensor(line["pred_relevant_windows"])
             windows = windows_and_scores[:, :2]
             for func_name in self.process_func_names:
                 windows = self.name2func[func_name](windows)
+                print(f'{func_name} result: {windows}')
             line["pred_relevant_windows"] = torch.cat(
                 [windows, windows_and_scores[:, 2:3]], dim=1).tolist()
             line["pred_relevant_windows"] = [e[:2] + [float(f"{e[2]:.4f}")] for e in line["pred_relevant_windows"]]
             processed_lines.append(line)
         return processed_lines
+    
+    ### ADDED
+    def process_windows(self, windows):
+        for func_name in self.process_func_names:
+            windows = self.name2func[func_name](windows)
+        return windows
 
     def clip_min_max_timestamps(self, windows):
         """

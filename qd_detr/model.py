@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx, new_loss
+from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx, span_cxw_to_window, new_loss
 
 from qd_detr.matcher import build_matcher
 from qd_detr.transformer import build_transformer
@@ -248,7 +248,7 @@ class SetCriterion(nn.Module):
     """
 
     def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, max_v_l,
-                 saliency_margin=1, iou_loss_type=0, use_matcher=True, diou=False, scheduling=0):
+                 saliency_margin=1, iou_loss_type=0, use_matcher=True, scheduling=0):
         """ Create the criterion.
         Parameters:
             matcher: module able to compute a matching between targets and proposals
@@ -268,7 +268,6 @@ class SetCriterion(nn.Module):
         self.span_loss_type = span_loss_type
         ### ADDED
         self.iou_loss_types = list(map(int, iou_loss_type))
-        self.diou = diou
         self.scheduling = scheduling
 
         self.max_v_l = max_v_l
@@ -294,7 +293,10 @@ class SetCriterion(nn.Module):
         targets = targets["span_labels"]
         idx = self._get_src_permutation_idx(indices)
         src_spans = outputs['pred_spans'][idx]  # (#spans, max_v_l * 2)
+        # print(f'src_spans: {span_cxw_to_window(src_spans)}')
         tgt_spans = torch.cat([t['spans'][i] for t, (_, i) in zip(targets, indices)], dim=0)  # (#spans, 2)
+        # durations = torch.cat([t['duration']])
+        # print(f'tgt_spans: {span_cxw_to_window(tgt_spans)}')
 
         losses = {}
 
@@ -309,21 +311,23 @@ class SetCriterion(nn.Module):
 
             if len(self.iou_loss_types) > 1 or self.iou_loss_types[0] != 0:            
                 if 1 <= self.scheduling <= 2:  # sim + giou sched
-                    loss_sim = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
 
                     loss_giou = 1 - torch.diag(generalized_temporal_iou(span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans)))
                     losses['loss_giou'] = loss_giou.mean()
 
                 elif self.scheduling == 3:  # sim + sim sched
-                    loss_sim = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
 
-                    loss_sim2 = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim2, ious2 = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
                     losses['loss_sim2'] = loss_sim2.mean()
 
                 else:
-                    loss_sim = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
                 
                 losses['loss_sim'] = loss_sim.mean()
+                self.sim = loss_sim.detach().cpu().tolist()
+                self.ious = ious.tolist()
 
         else:  # ce
             n_spans = src_spans.shape[0]
@@ -679,7 +683,7 @@ def build_model(args):
         eos_coef=args.eos_coef, temperature=args.temperature,
         span_loss_type=args.span_loss_type, iou_loss_type=args.loss_type, max_v_l=args.max_v_l,
         saliency_margin=args.saliency_margin, use_matcher=use_matcher,
-        diou=args.diou, scheduling=args.scheduling,
+        scheduling=args.scheduling,
     )
     criterion.to(device)
     return model, criterion

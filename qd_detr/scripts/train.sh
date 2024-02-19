@@ -4,11 +4,11 @@ v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
 
-exp_id=sched_cos_detach
+exp_id=no_pt_detach_savepred
 
-resume=/workspace/QD-DETR/results/loss0/pt-2023_12_26_08_43_26/model_best.ckpt
+resume=/workspace/qd_detr/results/loss0/pt-2024_02_16_15_43_29/model_best.ckpt
 loss_type=2
-scheduling=2
+scheduling=0
 
 ######## data paths
 train_path=data/highlight_train_release.jsonl
