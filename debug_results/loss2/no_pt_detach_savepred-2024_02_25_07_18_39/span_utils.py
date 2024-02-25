@@ -169,13 +169,13 @@ def S_Diff(iou, src_spans, tgt_spans, logits):
         for j in range(len(src_spans[i])):
             
             st, end = src_spans[i][j]
-            # st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometimes st is negative or end is larger than max_clip_len
+            st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometimes st is negative or end is larger than max_clip_len
             src_sim = logit[st:end + 1].mean()
             if torch.isnan(src_sim):
                 print(f'\nsrc: {src_sim},vid_len: {vid_len} \nbefore {src_spans[i][j]}\nafter [{st}, {end}]')
 
             st, end = tgt_spans[i][j]
-            # st, end = min(st, vid_len - 1), min(end, vid_len - 1)   # somtimes there are over-ranged gt window in pretrain dataset
+            st, end = min(st, vid_len - 1), min(end, vid_len - 1)   # somtimes there are over-ranged gt window in pretrain dataset
             tgt_sim = logit[st:end + 1].mean()
             if torch.isnan(tgt_sim):
                 print(f'\ntgt: {tgt_sim}, \nbefore {tgt_spans[i][j]}\nafter [{st}, {end}]')
@@ -210,12 +210,12 @@ def S_GT_P(iou, src_spans, tgt_spans, v2v_sims):  # S(Gt-P)
         for j in range(len(src_spans[i])):
             
             st, end = src_spans[i][j]
-            # st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometime st is negative value
+            st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometime st is negative value
             # src_feat = vid_feat[st:end + 1].mean(dim=0)
             i2i_sim = v2v_sim[st: end + 1, :]
 
             st, end = tgt_spans[i][j]
-            # st, end = min(st, vid_len - 1), min(end, vid_len - 1)
+            st, end = min(st, vid_len - 1), min(end, vid_len - 1)
             # tgt_feat = vid_feat[st:end + 1].mean(dim=0)
             i2i_sim = i2i_sim[:, st: end + 1]
 
@@ -260,7 +260,7 @@ def S_Q_P(iou, src_spans, logits):  # S(Q-P)
         for j in range(len(src_spans[i])):
         
             st, end = src_spans[i][j]
-            # st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometime st is negative value
+            st, end = min(max(st, 0), vid_len - 1), min(end, vid_len - 1)  # sometime st is negative value
             src_sim = logit[st:end + 1].mean()
 
             t2i_sims.append(src_sim)
@@ -312,8 +312,8 @@ def new_loss(iou_loss_types, spans1, spans2, sims, idx):
     #     print(spans2 * vid_clip_len)
 
     # [spans1, spans2] == [start clip number, end clip number]
-    spans1 = torch.clamp(torch.round(spans1 * vid_clip_len), min=0, max=74)
-    spans2 = torch.clamp(torch.round(spans2 * vid_clip_len), min=0, max=74)
+    spans1 = torch.round(spans1 * vid_clip_len)
+    spans2 = torch.round(spans2 * vid_clip_len)
     
     assert (spans1[:, 1] >= spans1[:, 0]).all()
     assert (spans2[:, 1] >= spans2[:, 0]).all()
@@ -322,8 +322,8 @@ def new_loss(iou_loss_types, spans1, spans2, sims, idx):
     tgt_spans = [[] for i in range(bsz)]
 
     for b, i in enumerate(idx):
-        src_spans[i].append(spans1[b].int().tolist())
-        tgt_spans[i].append(spans2[b].int().tolist())
+        src_spans[i].append(spans1[b].int().detach().cpu())
+        tgt_spans[i].append(spans2[b].int().detach().cpu())
 
     new_loss = 1 - iou
 
@@ -343,6 +343,8 @@ def new_loss(iou_loss_types, spans1, spans2, sims, idx):
     for b, i in enumerate(idx):
         ious[i].append(iou[b].item())
         sim_losses[i].append(new_loss[b].item())
+
+    print(f'src_spans: {src_spans}\ngt_spans: {tgt_spans}')
 
     return new_loss, {'src_spans': src_spans,
                       'tgt_spans': tgt_spans,

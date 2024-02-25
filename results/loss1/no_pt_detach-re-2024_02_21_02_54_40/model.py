@@ -316,38 +316,33 @@ class SetCriterion(nn.Module):
                 durations = torch.cat([torch.full_like(src, durations[i]) for i, (src, _) in enumerate(indices)])
 
                 if 1 <= self.scheduling <= 2:  # sim + giou sched
-                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
 
                     loss_giou = 1 - torch.diag(generalized_temporal_iou(span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans)))
                     losses['loss_giou'] = loss_giou.mean()
 
                 elif self.scheduling == 3:  # sim + sim sched
-                    loss_sim, savepred = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
 
-                    loss_sim2, savepred = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim2, ious2 = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
                     losses['loss_sim2'] = loss_sim2.mean()
 
                 else:
-                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, ious = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
                     ### save_pred2
                     # loss_sim, ious = new_loss(self.iou_loss_types, src_spans, tgt_spans, outputs['sims'], idx[0], durations)
                 
                 losses['loss_sim'] = loss_sim.mean()
 
                 if self.save_pred:
-                    # sim = loss_sim.detach().cpu().tolist()
-                    ### save_pred2
-                    # self.pred_spans = span_cxw_to_window(src_spans.detach().cpu(), durations, [bsz, idx[0]])
-                    # self.gt_spans = span_cxw_to_window(tgt_spans.detach().cpu(), durations, [bsz, idx[0]])
+                    self.sim = loss_sim.detach().cpu().tolist()
+                    self.ious = ious.tolist()
 
-                    # self.sim , self.ious = [[] for i in range(bsz)], [[] for i in range(bsz)]
-                    # for i, b in enumerate(idx[0]):
-                    #     self.sim[b].append(sim[i])
-                    #     self.ious[b].append(ious[i])
-                    self.pred_spans = savepred['src_spans']
-                    self.gt_spans = savepred['tgt_spans']
-                    self.sim_losses = savepred['sim_losses']
-                    self.ious = savepred['ious']
+                    self.batch_idx = [bsz, idx[0]]   # (bsz, ...)
+                    self.pred_spans = span_cxw_to_window(src_spans.detach().cpu(), durations, self.batch_idx)
+                    self.gt_spans = span_cxw_to_window(tgt_spans.detach().cpu(), durations, self.batch_idx)
+                    # print(f'src_spans: {span_cxw_to_window(src_spans.detach().cpu(), durations)}')
+                    # print(f'tgt_spans: {span_cxw_to_window(tgt_spans.detach().cpu(), durations)}')
 
         else:  # ce
             n_spans = src_spans.shape[0]
@@ -703,7 +698,7 @@ def build_model(args):
         eos_coef=args.eos_coef, temperature=args.temperature,
         span_loss_type=args.span_loss_type, iou_loss_type=args.loss_type, max_v_l=args.max_v_l,
         saliency_margin=args.saliency_margin, use_matcher=use_matcher,
-        scheduling=args.scheduling, save_pred=args.save_pred,
+        scheduling=args.scheduling,
     )
     criterion.to(device)
     return model, criterion

@@ -439,20 +439,19 @@ def compare_result(baseline, compare, gt, save_dir):
         else:
             compare_visualize('dec', -delta)
 
-def chk_training_process(submissions_path, gt_train, save_dir, n_chk=20, save_jsonl=True):
+def chk_training_process(submissions_path, save_dir, n_chk=20, save_jsonl=True):
     if not os.path.exists(save_dir):
-        print(f'>>> saved at {save_dir}')
+        print(f'\n>>> saved at {save_dir}\n')
         os.makedirs(save_dir)
 
     subm_files_lst = sorted(glob(submissions_path + '/*'), key=os.path.getctime)
     sumb_lst = [load_jsonl(s) for s in subm_files_lst]
 
-    best_ckpt_subm = sumb_lst[-1]
-    best_ckpt_result = compute_mr_r1(best_ckpt_subm, gt_train)
-    chk_lst = best_ckpt_result[:n_chk] + best_ckpt_result[-n_chk:]
+    best_ckpt_subm = sorted(sumb_lst[-1], key=lambda x: max(x['iou']))
+    chk_lst = best_ckpt_subm[:n_chk] + best_ckpt_subm[-n_chk:]
     chk_qid_lst = [c['qid'] for c in chk_lst]
 
-    ### for debug
+    ## for debug
     # for c in chk_lst:
     #     print(c['vid'], end='.mp4 ')
     # print()
@@ -462,21 +461,12 @@ def chk_training_process(submissions_path, gt_train, save_dir, n_chk=20, save_js
     for sumb in sumb_lst:
         chk_sumb_lst.append(sorted([s for s in sumb if s['qid'] in chk_qid_lst], key=lambda x: x['qid']))
 
-    chk_gt_lst = sorted([g for g in gt_train if g['qid'] in chk_qid_lst], key=lambda x: x['qid'])
-
-    chk_result_lst = []
-    for cs in chk_sumb_lst:
-        chk_result_lst.append(compute_mr_r1(cs, chk_gt_lst))
-    chk_result_lst = [sorted(cr, key=lambda x: x['qid']) for cr in chk_result_lst]
-
     ### for debug
-    # for cs, cr in zip(chk_sumb_lst, chk_result_lst):
-    #     for i in range(len(cs)):
-    #         print(f'i: {i}\tgt: {chk_gt_lst[i]["qid"]}\tsumb: {cs[i]["qid"]}\tresult: {cr[i]["qid"]}')
-    #     break
+    # for i, cs in enumerate(chk_sumb_lst[-1]):
+    #     print(f'i: {i}\tsumb qid: {cs["qid"]}\tiou: {max(cs["iou"])}')
     # return
 
-    n_ckpts = len(chk_result_lst)
+    n_ckpts = len(chk_sumb_lst)
     total_n_chk = 2 * n_chk
 
     if save_jsonl:
@@ -485,66 +475,61 @@ def chk_training_process(submissions_path, gt_train, save_dir, n_chk=20, save_js
             with open(f'{save_dir}/jsonl/ckpt{n}_chk_sumb.jsonl', 'w') as f:    
                 for cs in chk_sumb_lst[n]:
                     f.write(f"{json.dumps(cs)}\n")
-            with open(f'{save_dir}/jsonl/ckpt{n}_result_IOU.jsonl', 'w') as f:    
-                for cr in chk_result_lst[n]:
-                    f.write(f"{json.dumps(cr)}\n")
 
     video_loader = VideoLoader(framerate=1/2, size=224, centercrop=True)
 
     for n in tqdm(range(total_n_chk), desc='for each videos'):
-        vid = chk_result_lst[0][n]['vid']
-        qid = chk_result_lst[0][n]['qid']
+        vid = chk_sumb_lst[0][n]['vid']
+        qid = chk_sumb_lst[0][n]['qid']
+        final_iou = max(chk_sumb_lst[-1][n]["iou"])
 
         vid_path = f'/workspace/qv_train/{vid}.mp4'
         video_frames = video_loader.read_video_from_file(vid_path)
         video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
         vid_len = len(video_frames)
 
-        img_save_path = os.path.join(save_dir, f'{chk_result_lst[-1][n]["iou"]:.2f}_{qid}_{vid}')
-        os.makedirs(img_save_path, exist_ok=True)
-
         for ckpt in tqdm(range(n_ckpts), desc='for each ckpts'):
-            s = chk_result_lst[ckpt][n]
-            result_iou = s['iou']
+            s = chk_sumb_lst[ckpt][n]
 
-            sumb = chk_sumb_lst[ckpt][n]
-            sim_loss = sumb['sim_loss']
-            train_iou = sumb['ious']
-            if train_iou == 1:
-                sim = 1
-            else:
-                sim = 1 - (sim_loss - 1 + train_iou) / (1 - train_iou)
+            for i, (sim_loss, iou, pred_span, gt_span) in enumerate(zip(s['sim_loss'], s['iou'], s['pred_span'], s['gt_span'])):
+                img_save_path = os.path.join(save_dir, f'{final_iou:.2f}_{qid}_{vid}_{i}')
+                os.makedirs(img_save_path, exist_ok=True)
 
-            pred_st, pred_end = window2clips(s['pred_wds'])
-            gt_st, gt_end = window2clips(s['gt_wds'])
-
-            n_rows, n_cols = 5, math.ceil(vid_len / 5)
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
-            
-            fig.suptitle(f'Query: {s["query"]}\nresult iou:  {result_iou:.4f}    train_iou:  {train_iou:.4f}\nsim_loss:  {sim_loss:.4f}    sim:  {sim:.4f}')
-
-            for axis in axes.flatten():
-                axis.axis('off')
-            
-            for i in range(vid_len):
-                r = i // n_cols
-                c = i % n_cols
-
-                axes[r][c].set_title(str(i), fontsize=6)
-                if gt_st <= i <= gt_end:
-                    axes[r][c].text(0, 0, 'GT', fontsize=6, color='green')
-                    axes[r][c].imshow(video_frames[i])
-                
-                if pred_st <= i <= pred_end:
-                    axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
-                    axes[r][c].imshow(video_frames[i])
-                
+                if iou == 1:
+                    sim = 1
                 else:
-                    axes[r][c].imshow(video_frames[i], alpha=0.6)
+                    sim = 1 - (sim_loss - 1 + iou) / (1 - iou)
+
+                pred_st, pred_end = pred_span
+                gt_st, gt_end = gt_span
+
+                n_rows, n_cols = 5, math.ceil(vid_len / 5)
+                fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+                
+                fig.suptitle(f'Query: {s["query"]}\niou:  {iou:.4f}\nsim_loss:  {sim_loss:.4f}    sim:  {sim:.4f}')
+
+                for axis in axes.flatten():
+                    axis.axis('off')
+                
+                for i in range(vid_len):
+                    r = i // n_cols
+                    c = i % n_cols
+
+                    axes[r][c].set_title(str(i), fontsize=6)
+                    if gt_st <= i <= gt_end:
+                        axes[r][c].text(0, 0, 'GT', fontsize=6, color='green')
+                        axes[r][c].imshow(video_frames[i])
+                    
+                    if pred_st <= i <= pred_end:
+                        axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
+                        axes[r][c].imshow(video_frames[i])
+                    
+                    else:
+                        axes[r][c].imshow(video_frames[i], alpha=0.6)
+                
+                fig.savefig(f'{img_save_path}/ckpt_{ckpt}_{iou:.4f}.png', bbox_inches='tight', pad_inches=0)
+                plt.close()
             
-            fig.savefig(f'{img_save_path}/ckpt_{ckpt}_{result_iou:.4f}.png', bbox_inches='tight', pad_inches=0)
-            plt.close()
-        
   
         
 if __name__ == "__main__":
@@ -566,15 +551,13 @@ if __name__ == "__main__":
     # similar_clip_eval(0.8)
     # similar_clip_eval(0.9)
 
-    baseline_path = '/workspace/QD-DETR/results/loss0/no_pt-2023_12_26_08_49_07/best_hl_val_preds.jsonl'
+    # baseline_path = '/workspace/QD-DETR/results/loss0/no_pt-2023_12_26_08_49_07/best_hl_val_preds.jsonl'
     # baseline = load_jsonl(baseline_path)
 
     # compare_result(baseline, submission, gt, save_dir + '/compare')
 
-    exp_path = '/workspace/qd_detr/results/loss2/detach_save_pred_sim-2024_02_16_14_37_59'
+    exp_path = '/workspace/qd_detr/results/loss2/no_pt_detach_savepred-2024_02_25_07_21_17'
     exp_name = ('-').join(exp_path.split('/')[-1].split('-')[:-1])
     save_dir = os.path.join('visualize', exp_path.split('/')[4], exp_name)
 
-    gt_train_path = '/workspace/qd_detr/data/highlight_train_release.jsonl'
-    gt_train = load_jsonl(gt_train_path)
-    chk_training_process(exp_path + '/submissions', gt_train, save_dir + '/chk_training')
+    chk_training_process(exp_path + '/submissions', save_dir + '/chk_training')

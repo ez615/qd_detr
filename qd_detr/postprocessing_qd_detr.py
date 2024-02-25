@@ -30,7 +30,7 @@ class PostProcessorDETR:
             windows = windows_and_scores[:, :2]
             for func_name in self.process_func_names:
                 windows = self.name2func[func_name](windows)
-                print(f'{func_name} result: {windows}')
+                # print(f'{func_name} result: {windows}')
             line["pred_relevant_windows"] = torch.cat(
                 [windows, windows_and_scores[:, 2:3]], dim=1).tolist()
             line["pred_relevant_windows"] = [e[:2] + [float(f"{e[2]:.4f}")] for e in line["pred_relevant_windows"]]

@@ -78,6 +78,15 @@ def train_epoch(model, criterion, train_loader, optimizer, opt, epoch_i, tb_writ
         weight_dict = criterion.weight_dict
 
         if opt.save_pred:
+            # prob = F.softmax(outputs["pred_logits"], -1)  # (batch_size, #queries, #classes=2)
+            # scores = prob[..., 0]  # * (batch_size, #queries)  foreground label is 0, we directly take it
+            # pred_spans = outputs["pred_spans"]  # (bsz, #queries, 2)
+            # _saliency_scores = outputs["saliency_scores"].half()  # (bsz, L)
+            # saliency_scores = []
+            # valid_vid_lengths = model_inputs["src_vid_mask"].sum(1).cpu().tolist()
+            # for j in range(len(valid_vid_lengths)):
+            #     saliency_scores.append(_saliency_scores[j, :int(valid_vid_lengths[j])].tolist())
+            
             query_meta = batch[0]
             # # compose predictions
             # for idx, (meta, spans, score) in enumerate(zip(query_meta, pred_spans.cpu(), scores.cpu())):
@@ -97,14 +106,15 @@ def train_epoch(model, criterion, train_loader, optimizer, opt, epoch_i, tb_writ
             #         pred_relevant_windows=cur_ranked_preds,
             #         pred_saliency_scores=saliency_scores[idx],
             #     )
-            for idx, meta in enumerate(query_meta):
-                # meta = query_meta[idx]
+            bsz, batch_idx = criterion.batch_idx
+            for idx in range(len(bsz)):
+                meta = query_meta[idx]
                 cur_query_pred = dict(
                     idx=idx,
                     qid=meta["qid"],
                     query=meta["query"],
                     vid=meta["vid"],
-                    sim_loss=criterion.sim_losses[idx],
+                    sim_loss=criterion.sim[idx],
                     iou=criterion.ious[idx],
                     pred_span=criterion.pred_spans[idx],
                     gt_span=criterion.gt_spans[idx],

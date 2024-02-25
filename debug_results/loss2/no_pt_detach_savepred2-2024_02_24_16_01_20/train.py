@@ -104,7 +104,7 @@ def train_epoch(model, criterion, train_loader, optimizer, opt, epoch_i, tb_writ
                     qid=meta["qid"],
                     query=meta["query"],
                     vid=meta["vid"],
-                    sim_loss=criterion.sim_losses[idx],
+                    sim_loss=criterion.sim[idx],
                     iou=criterion.ious[idx],
                     pred_span=criterion.pred_spans[idx],
                     gt_span=criterion.gt_spans[idx],

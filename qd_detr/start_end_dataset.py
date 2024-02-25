@@ -374,5 +374,6 @@ def prepare_batch_inputs(batched_model_inputs, device, non_blocking=False):
     if "saliency_all_labels" in batched_model_inputs:
         targets["saliency_all_labels"] = batched_model_inputs["saliency_all_labels"].to(device, non_blocking=non_blocking)
 
+    targets["durations"] = [vid.shape[0] * 2 for vid in model_inputs["src_vid"]]
     targets = None if len(targets) == 0 else targets
     return model_inputs, targets
