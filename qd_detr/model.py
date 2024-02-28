@@ -6,8 +6,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-### save_pred2
-# from qd_detr.span_utils2 import generalized_temporal_iou, span_cxw_to_xx, span_cxw_to_window, new_loss
 from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx, span_cxw_to_window, new_loss
 
 from qd_detr.matcher import build_matcher
@@ -131,7 +129,7 @@ class QDDETR(nn.Module):
         if 1 in self.loss_types or 3 in self.loss_types:
             t2v_sims = []
             for i in range(bsz):
-                t2v_cos_sim = F.softmax(temp_scale * text_feat[i] @ vid_feat[i].t(), dim=1)
+                t2v_cos_sim = F.softmax(temp_scale * (text_feat[i] @ vid_feat[i].t()), dim=1)
                 t2v_sims.append(t2v_cos_sim)
             t2v_sims = torch.stack(t2v_sims, 0).sum(1)
 
@@ -143,13 +141,22 @@ class QDDETR(nn.Module):
             # sims = vid_feat
             v2v_sims = []
             for i in range(bsz):
-                v2v_cos_sim = F.softmax(temp_scale * vid_feat[i] @ vid_feat[i].t(), dim=1)  # [75, 75]
+                # v2v_cos_sim = F.softmax(temp_scale * vid_feat[i] @ vid_feat[i].t(), dim=1)  # [75, 75]
+                
+                ### no scaling
+                # v2v_cos_sim = vid_feat[i] @ vid_feat[i].t()  # [75, 75]
+
+                ### fill_diagonal_neg_ones
+                v2v_cos_sim = (vid_feat[i] @ vid_feat[i].t()).fill_diagonal_(-1)
+                v2v_cos_sim = F.softmax(v2v_cos_sim, dim=1)
+
                 v2v_sims.append(v2v_cos_sim)
+
             v2v_sims = torch.stack(v2v_sims, 0)
+            # print(f'v2v_sims: {v2v_sims}')
 
             # sims.append(v2v_sims)
             sims[1] = v2v_sims
-            # print(f'2 sims shape: {sims.shape}')
 
         # print(f'after sims shape: {sims.shape}')
 
@@ -294,12 +301,25 @@ class SetCriterion(nn.Module):
            The target spans are expected in format (center_x, w), normalized by the image size.
         """
         assert 'pred_spans' in outputs
-        durations = targets["durations"]
-        bsz = len(durations)
+        # durations = targets["durations"]
+        # bsz = len(durations)
         targets = targets["span_labels"]
         idx = self._get_src_permutation_idx(indices)
         src_spans = outputs['pred_spans'][idx]  # (#spans, max_v_l * 2)
         tgt_spans = torch.cat([t['spans'][i] for t, (_, i) in zip(targets, indices)], dim=0)  # (#spans, 2)
+
+        # if 'saliency_scores' in outputs:
+        #     saliency_scores = outputs["saliency_scores"].detach()
+        #     saliency_scores -= saliency_scores.min()
+        #     saliency_scores /= saliency_scores.max()
+
+        #     v2v_sims = outputs['sims'][1]
+        #     weighted_v2v_sims = torch.stack([torch.stack([clip_sim * score for clip_sim in v2v_sim]) for v2v_sim, score in zip(v2v_sims, saliency_scores)])
+
+        #     for score, sim, w_sim in zip(saliency_scores, v2v_sims, weighted_v2v_sims):
+        #         for s, w_s in zip(sim, w_sim):
+        #             print(f'score: {score[:3]}\nbefore: {s[:3].tolist()}\nafter: {w_s[:3].tolist()}')
+        #         break
 
         losses = {}
 
@@ -313,7 +333,7 @@ class SetCriterion(nn.Module):
                 # losses['loss_sim'] = 0
 
             if len(self.iou_loss_types) > 1 or self.iou_loss_types[0] != 0:
-                durations = torch.cat([torch.full_like(src, durations[i]) for i, (src, _) in enumerate(indices)])
+                # durations = torch.cat([torch.full_like(src, durations[i]) for i, (src, _) in enumerate(indices)])
 
                 if 1 <= self.scheduling <= 2:  # sim + giou sched
                     loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
@@ -328,22 +348,12 @@ class SetCriterion(nn.Module):
                     losses['loss_sim2'] = loss_sim2.mean()
 
                 else:
+                    
                     loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
-                    ### save_pred2
-                    # loss_sim, ious = new_loss(self.iou_loss_types, src_spans, tgt_spans, outputs['sims'], idx[0], durations)
                 
                 losses['loss_sim'] = loss_sim.mean()
 
                 if self.save_pred:
-                    # sim = loss_sim.detach().cpu().tolist()
-                    ### save_pred2
-                    # self.pred_spans = span_cxw_to_window(src_spans.detach().cpu(), durations, [bsz, idx[0]])
-                    # self.gt_spans = span_cxw_to_window(tgt_spans.detach().cpu(), durations, [bsz, idx[0]])
-
-                    # self.sim , self.ious = [[] for i in range(bsz)], [[] for i in range(bsz)]
-                    # for i, b in enumerate(idx[0]):
-                    #     self.sim[b].append(sim[i])
-                    #     self.ious[b].append(ious[i])
                     self.pred_spans = savepred['src_spans']
                     self.gt_spans = savepred['tgt_spans']
                     self.sim_losses = savepred['sim_losses']

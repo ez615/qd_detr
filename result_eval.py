@@ -498,7 +498,7 @@ def chk_training_process(submissions_path, save_dir, n_chk=20, save_jsonl=True):
                 if iou == 1:
                     sim = 1
                 else:
-                    sim = 1 - (sim_loss - 1 + iou) / (1 - iou)
+                    sim = 2 - sim_loss / (1 - iou)
 
                 pred_st, pred_end = pred_span
                 gt_st, gt_end = gt_span
