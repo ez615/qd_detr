@@ -1,0 +1,1 @@
+2024_03_19_05_03_33 [Epoch] 001 [Loss] loss_sim 1.4450 loss_span 1.5748 loss_label 0.8134 class_error 57.4242 loss_saliency 49.1517 loss_sim_0 1.4419 loss_span_0 1.3696 loss_label_0 0.6575 class_error_0 15.0758 loss_overall 56.4539

@@ -194,6 +194,10 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
             model_inputs, targets = prepare_batch_inputs(batch[1], opt.device, non_blocking=opt.pin_memory)
         else:
             model_inputs, targets = prepare_batch_inputs_audio(batch[1], opt.device, non_blocking=opt.pin_memory)
+
+        ### ADDED
+        targets['durations'] = [b["duration"] // opt.clip_length for b in batch[0]] 
+
         outputs = model(**model_inputs)
         prob = F.softmax(outputs["pred_logits"], -1)  # (batch_size, #queries, #classes=2)
         if opt.span_loss_type == "l1":

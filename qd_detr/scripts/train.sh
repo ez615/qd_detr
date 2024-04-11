@@ -4,7 +4,7 @@ v_feat_types=slowfast_clip
 t_feat_type=clip 
 results_root=results
 
-exp_id=fill_neg_ones2
+exp_id=du2_neg1
 
 resume=/workspace/qd_detr/results/loss0/pt-2024_02_16_15_43_29/model_best.ckpt
 loss_type=2

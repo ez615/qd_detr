@@ -23,7 +23,7 @@ class QDDETR(nn.Module):
     """ QD DETR. """
 
     def __init__(self, transformer, position_embed, txt_position_embed, txt_dim, vid_dim,
-                 num_queries, input_dropout, loss_type=1, aux_loss=False,
+                 num_queries, input_dropout, loss_type=1, temp_factor=0.07, aux_loss=False,
                  contrastive_align_loss=False, contrastive_hdim=64,
                  max_v_l=75, span_loss_type="l1", use_txt_pos=False, n_input_proj=2, aud_dim=0):
         """ Initializes the model.
@@ -85,11 +85,13 @@ class QDDETR(nn.Module):
         ### ADDED
         self.loss_types = list(map(int, loss_type))
         print(f'self.loss_types: {self.loss_types}')
-        self.temp_scale = nn.Parameter(torch.log(torch.tensor(1/0.07)))
+        self.temp_factor = temp_factor
+        self.temp_scale = nn.Parameter(torch.log(torch.tensor(1/self.temp_factor)))
 
         self.hidden_dim = hidden_dim
         self.global_rep_token = torch.nn.Parameter(torch.randn(hidden_dim))
         self.global_rep_pos = torch.nn.Parameter(torch.randn(hidden_dim))
+
 
     def forward(self, src_txt, src_txt_mask, src_vid, src_vid_mask, src_aud=None, src_aud_mask=None):
         """The forward expects two tensors:
@@ -110,7 +112,7 @@ class QDDETR(nn.Module):
         """
         if src_aud is not None:
             src_vid = torch.cat([src_vid, src_aud], dim=2)
-            
+        
         src_vid = self.input_vid_proj(src_vid)
         src_txt = self.input_txt_proj(src_txt)
 
@@ -118,42 +120,62 @@ class QDDETR(nn.Module):
         ### for new loss ###
         vid_feat = src_vid / src_vid.norm(dim=-1, keepdim=True)
         vid_feat = vid_feat.detach()
-        # print(f'vid_feat: {vid_feat}')
+
+        
+        # L_v = [torch.count_nonzero(v).item() for v in src_vid_mask]
+        vid_feat_mask = src_vid_mask.unsqueeze(-1).repeat(1, 1, self.transformer.d_model)
+        # vid_feat = vid_feat.masked_fill(vid_feat_mask == 0, -9e15).detach()
+        
         text_feat = src_txt / src_txt.norm(dim=-1, keepdim=True)
         text_feat = text_feat.detach()
+        # L_t = [torch.count_nonzero(t).item() for t in src_txt_mask]
+        text_feat_mask = src_txt_mask.unsqueeze(-1).repeat(1, 1, self.transformer.d_model)
+        # text_feat = text_feat.masked_fill(text_feat_mask == 0, -9e15).detach()
+        # print(f'{[t.shape for t in text_feat]}')
 
         temp_scale = self.temp_scale.exp()  # for temperature scaling
+        temp_scale = torch.clamp(temp_scale, 0, 4.6052)
+        # temp_scale = torch.tensor(1/0.07)
         sims = [[], []]
-        bsz = vid_feat.shape[0]
+        bsz, vid_len = src_vid.shape[:2]
 
         if 1 in self.loss_types or 3 in self.loss_types:
+            # t2v_sims = torch.zeros((bsz, vid_len))
             t2v_sims = []
+            
             for i in range(bsz):
-                t2v_cos_sim = F.softmax(temp_scale * (text_feat[i] @ vid_feat[i].t()), dim=1)
-                t2v_sims.append(t2v_cos_sim)
-            t2v_sims = torch.stack(t2v_sims, 0).sum(1)
-
+                mask = text_feat_mask[i] @ vid_feat_mask[i].t()
+                
+                t2v_cos_sim = temp_scale * (text_feat[i] @ vid_feat[i].t())
+                t2v_cos_sim = F.softmax(t2v_cos_sim.masked_fill(mask == 0, 0), dim=1)
+                t2v_sims.append(t2v_cos_sim.sum(0))
+                # t2v_sims[i, :L_v[i]] = t2v_cos_sim.sum(0)
+            t2v_sims = torch.stack(t2v_sims, 0)
             # sims.append(t2v_sims)
             sims[0] = t2v_sims
             # print(f'1 3 sims shape: {sims.shape}')
 
         if 2 in self.loss_types:
-            # sims = vid_feat
+            # v2v_sims = torch.zeros((bsz, vid_len, vid_len))
             v2v_sims = []
             for i in range(bsz):
-                # v2v_cos_sim = F.softmax(temp_scale * vid_feat[i] @ vid_feat[i].t(), dim=1)  # [75, 75]
-                
+                # vid = vid_feat[i, :L_v[i]]
+                mask = vid_feat_mask[i] @ vid_feat_mask[i].t()
+
+                v2v_cos_sim = temp_scale * (vid_feat[i] @ vid_feat[i].t())
+                v2v_cos_sim = F.softmax(v2v_cos_sim.masked_fill(mask == 0, 0), dim=1)  # [75, 75]
+
                 ### no scaling
                 # v2v_cos_sim = vid_feat[i] @ vid_feat[i].t()  # [75, 75]
 
                 ### fill_diagonal_neg_ones
-                v2v_cos_sim = (vid_feat[i] @ vid_feat[i].t()).fill_diagonal_(-1)
-                v2v_cos_sim = F.softmax(v2v_cos_sim, dim=1)
+                # v2v_cos_sim = (vid_feat[i] @ vid_feat[i].t()).fill_diagonal_(-1)
+                # v2v_cos_sim = F.softmax(v2v_cos_sim, dim=1)
 
+                # v2v_sims[i, :L_v[i], :L_v[i]] = v2v_cos_sim
                 v2v_sims.append(v2v_cos_sim)
 
             v2v_sims = torch.stack(v2v_sims, 0)
-            # print(f'v2v_sims: {v2v_sims}')
 
             # sims.append(v2v_sims)
             sims[1] = v2v_sims
@@ -191,6 +213,7 @@ class QDDETR(nn.Module):
 
         ### ADDED
         out['sims'] = sims
+        out['temp_scale'] = temp_scale
 
         txt_mem = memory[:, src_vid.shape[1]:]  # (bsz, L_txt, d)
         vid_mem = memory[:, :src_vid.shape[1]]  # (bsz, L_vid, d)
@@ -249,6 +272,55 @@ class QDDETR(nn.Module):
     #     return [{'pred_logits': a, 'pred_spans': b}
     #             for a, b in zip(outputs_class[:-1], outputs_coord[:-1])]
 
+    def get_similarity_map(self, src_txt, src_txt_mask, src_vid, src_vid_mask):
+        src_vid = self.input_vid_proj(src_vid)
+        src_txt = self.input_txt_proj(src_txt)
+
+        vid_feat = src_vid / src_vid.norm(dim=-1, keepdim=True)
+        vid_feat = vid_feat.detach()
+        vid_feat_mask = src_vid_mask.unsqueeze(-1).repeat(1, 1, self.transformer.d_model)
+        
+        text_feat = src_txt / src_txt.norm(dim=-1, keepdim=True)
+        text_feat = text_feat.detach()
+        text_feat_mask = src_txt_mask.unsqueeze(-1).repeat(1, 1, self.transformer.d_model)
+
+        temp_scale = self.temp_scale.exp()  # for temperature scaling
+        temp_scale = torch.clamp(temp_scale, 0, 4.6052)
+
+        sims = [[], []]
+        bsz, vid_len = src_vid.shape[:2]
+
+        if 1 in self.loss_types or 3 in self.loss_types:
+            t2v_sims = []
+            
+            for i in range(bsz):
+                mask = text_feat_mask[i] @ vid_feat_mask[i].t()
+                
+                t2v_cos_sim = temp_scale * (text_feat[i] @ vid_feat[i].t())
+                t2v_cos_sim = F.softmax(t2v_cos_sim.masked_fill(mask == 0, 0), dim=1)
+
+                t2v_sims.append(t2v_cos_sim.sum(0))
+
+            t2v_sims = torch.stack(t2v_sims, 0)
+
+            sims[0] = t2v_sims
+
+        if 2 in self.loss_types:
+            v2v_sims = []
+            for i in range(bsz):
+                mask = vid_feat_mask[i] @ vid_feat_mask[i].t()
+
+                v2v_cos_sim = temp_scale * (vid_feat[i] @ vid_feat[i].t())
+                v2v_cos_sim = F.softmax(v2v_cos_sim.masked_fill(mask == 0, 0), dim=1)  # [75, 75]
+
+                v2v_sims.append(v2v_cos_sim)
+
+            v2v_sims = torch.stack(v2v_sims, 0)
+
+            sims[1] = v2v_sims
+
+        return sims
+
 
 class SetCriterion(nn.Module):
     """ This class computes the loss for DETR.
@@ -301,7 +373,7 @@ class SetCriterion(nn.Module):
            The target spans are expected in format (center_x, w), normalized by the image size.
         """
         assert 'pred_spans' in outputs
-        # durations = targets["durations"]
+        durations = targets["durations"]
         # bsz = len(durations)
         targets = targets["span_labels"]
         idx = self._get_src_permutation_idx(indices)
@@ -336,20 +408,19 @@ class SetCriterion(nn.Module):
                 # durations = torch.cat([torch.full_like(src, durations[i]) for i, (src, _) in enumerate(indices)])
 
                 if 1 <= self.scheduling <= 2:  # sim + giou sched
-                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0], durations)
 
                     loss_giou = 1 - torch.diag(generalized_temporal_iou(span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans)))
                     losses['loss_giou'] = loss_giou.mean()
 
                 elif self.scheduling == 3:  # sim + sim sched
-                    loss_sim, savepred = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, savepred = new_loss(self.iou_loss_types[:1], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0], durations)
 
-                    loss_sim2, savepred = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim2, savepred = new_loss(self.iou_loss_types[1:], span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0], durations)
                     losses['loss_sim2'] = loss_sim2.mean()
 
                 else:
-                    
-                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0])
+                    loss_sim, savepred = new_loss(self.iou_loss_types, span_cxw_to_xx(src_spans), span_cxw_to_xx(tgt_spans), outputs['sims'], idx[0], durations)
                 
                 losses['loss_sim'] = loss_sim.mean()
 
@@ -644,6 +715,7 @@ def build_model(args):
             num_queries=args.num_queries,
             input_dropout=args.input_dropout,
             loss_type=args.loss_type,
+            temp_factor=args.temp_factor,
             aux_loss=args.aux_loss,
             contrastive_align_loss=args.contrastive_align_loss,
             contrastive_hdim=args.contrastive_hdim,

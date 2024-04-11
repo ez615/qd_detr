@@ -1,0 +1,2 @@
+2024_03_19_09_29_13 [Epoch] 001 [Loss] loss_sim 1.4635 loss_span 1.0686 loss_label 0.6335 class_error 1.8661 loss_saliency 5.2299 loss_sim_0 1.4612 loss_span_0 1.0546 loss_label_0 0.6297 class_error_0 1.4987 loss_overall 11.5409
+2024_03_19_09_57_20 [Epoch] 002 [Loss] loss_sim 1.4167 loss_span 1.0477 loss_label 0.5493 class_error 6.2982 loss_saliency 4.6023 loss_sim_0 1.4440 loss_span_0 1.0098 loss_label_0 0.6125 class_error_0 2.6059 loss_overall 10.6823

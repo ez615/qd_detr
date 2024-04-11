@@ -20,6 +20,12 @@ import torch
 from torch.utils.data import DataLoader
 from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx
 
+from qd_detr.config import TestOptions
+import torch.backends.cudnn as cudnn
+from qd_detr.model import build_model
+from torch.utils.data import DataLoader
+from qd_detr.inference import setup_model
+
 
 def compute_average_precision_detection_wrapper(
         input_triple, tiou_thresholds=np.linspace(0.5, 0.95, 10)):
@@ -81,7 +87,7 @@ def compute_mr_ap(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10),
     return ap_array
 
 
-def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10)):
+def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10), no_sorted=False):
     """If a predicted segment has IoU >= iou_thd with one of the 1st GT segment, we define it positive"""
     iou_thds = [float(f"{e:.2f}") for e in iou_thds]
     pred_qid2window = {d["qid"]: d["pred_relevant_windows"][0][:2] for d in submission}  # :2 rm scores
@@ -126,8 +132,10 @@ def compute_mr_r1(submission, ground_truth, iou_thds=np.linspace(0.5, 0.95, 10))
     # plt.hist(query_len)
     # plt.savefig('query_len_hist.png')
     # plt.close()
-
-    return sorted(iou, key=lambda x:x['iou'])
+    if no_sorted:
+        return iou
+    else:
+        return sorted(iou, key=lambda x:x['iou'])
 
 
 def result_evaluation(submission, gt, save_dir, exp_name):
@@ -529,15 +537,125 @@ def chk_training_process(submissions_path, save_dir, n_chk=20, save_jsonl=True):
                 
                 fig.savefig(f'{img_save_path}/ckpt_{ckpt}_{iou:.4f}.png', bbox_inches='tight', pad_inches=0)
                 plt.close()
+
+
+@torch.no_grad()
+def chk_similarity(exp, gt, loss_type, img_save_path, top_k=10):
+    opt = TestOptions().parse()
+
+    opt.eval_split_name = 'val'
+    opt.eval_path = '/workspace/qd_detr/data/highlight_val_release.jsonl'
+    opt.resume = os.path.join(exp, 'model_best.ckpt')
+    opt.loss_type = loss_type
+
+    cudnn.benchmark = True
+    cudnn.deterministic = False
+
+    eval_dataset = StartEndDataset(
+        dset_name=opt.dset_name,
+        data_path=opt.eval_path,
+        v_feat_dirs=opt.v_feat_dirs,
+        q_feat_dir=opt.t_feat_dir,
+        q_feat_type="last_hidden_state",
+        max_q_l=opt.max_q_l,
+        max_v_l=opt.max_v_l,
+        ctx_mode=opt.ctx_mode,
+        data_ratio=opt.data_ratio,
+        normalize_v=not opt.no_norm_vfeat,
+        normalize_t=not opt.no_norm_tfeat,
+        clip_len=opt.clip_length,
+        max_windows=opt.max_windows,
+        load_labels=True,  # opt.eval_split_name == "val",
+        span_loss_type=opt.span_loss_type,
+        txt_drop_ratio=0,
+        dset_domain=opt.dset_domain,
+    )
+
+    model = setup_model(opt)[0]
+
+    eval_loader = DataLoader(
+        eval_dataset,
+        collate_fn=start_end_collate,
+        batch_size=opt.eval_bsz,
+        num_workers=opt.num_workers,
+        shuffle=False,
+        pin_memory=opt.pin_memory
+    )
+
+    video_loader = VideoLoader(framerate=1/2, size=224, centercrop=True)
+
+    print(f'\n>>> saved at {img_save_path}\n')
+    os.makedirs(img_save_path, exist_ok=True)
+
+    submission = load_jsonl(os.path.join(exp, 'best_hl_val_preds.jsonl'))
+    mr_result = compute_mr_r1(submission, gt, no_sorted=True)  # dict list
+
+    model.eval()
+
+    for i, (query_meta, batch) in enumerate(tqdm(eval_loader, desc="chk similarity")):
+        model_inputs, _ = prepare_batch_inputs(batch, opt.device, non_blocking=opt.pin_memory)
+
+        result_idx = i * opt.eval_bsz
+        result = mr_result[result_idx:result_idx + opt.eval_bsz]
+
+        sims = model.get_similarity_map(**model_inputs)[1]
+
+        # print(f'subm: {[d["qid"] for d in subm]}')
+        # print(f'meta: {[d["qid"] for d in query_meta]}')
+        for idx, sim in enumerate(tqdm(sims, desc='in batch')):
+            result_i = result[idx]
+
+            gt_st, gt_ed = window2clips(result_i['gt_wds'])
+            gt_ed -= 1
+
+            if gt_ed < 1:
+                continue
             
-  
+            pred_st, pred_ed = window2clips(result_i['pred_wds'])
+            pred_ed -= 1
+
+            gt_sim = sim[gt_st:gt_ed + 1, :]
+            indices = gt_sim.sort(descending=True)[1][:, :top_k]
+            max_sims = gt_sim.max(dim=1)[0]
+            # print(f'max_sims: {max_sims}\nmax: {max_sims.max().item()}\tmean:{max_sims.mean()}\tstd: {max_sims.std()}')
+
+            vid_path = f'/workspace/val/{result_i["vid"]}.mp4'
+            video_frames = video_loader.read_video_from_file(vid_path)
+            video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
+            
+            n_rows, n_cols = max(indices.shape[0], 2), top_k + 1
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+            
+            fig.suptitle(f'Query: {result_i["query"]}\niou:  {result_i["iou"]:.4f}\ngt span: [{gt_st}, {gt_ed}]    pred_span: [{pred_st}, {pred_ed}]\nmax: {max_sims.max().item():.4f}    mean:{max_sims.mean():.4f}    std: {max_sims.std():.4f}')
+
+            for axis in axes.flatten():
+                axis.axis('off')
+            
+            for r in range(n_rows):
+                gt_i = gt_st + r
+                axes[r][0].set_title(f'GT {gt_i}', fontsize=6)
+                for c in range(n_cols):
+                    if c == 0:
+                        axes[r][c].imshow(video_frames[gt_i])
+                    else:
+                        indice = indices[r][c - 1]
+                        axes[r][c].set_title(f'clip {indice}: {sim[gt_i, indice].item():.4f}', fontsize=6)
+                        if pred_st <= indice <= pred_ed:
+                            axes[r][c].imshow(video_frames[indice])
+                        else:
+                            axes[r][c].imshow(video_frames[indice], alpha=0.6)
+            
+            fig.savefig(f'{img_save_path}/{result_i["iou"]:.4f}_{result_i["qid"]}.png', bbox_inches='tight', pad_inches=0)
+            plt.close()
+            
+        break
         
 if __name__ == "__main__":
-    gt_path = '/workspace/QD-DETR/data/highlight_val_release.jsonl'
+    gt_path = '/workspace/qd_detr/data/highlight_val_release.jsonl'
     submission_path = '/workspace/QD-DETR/results/loss0/no_pt_re-2024_01_11_08_44_41/best_hl_val_preds.jsonl'
 
     # submission = load_jsonl(submission_path)
-    # gt = load_jsonl(gt_path)
+    gt = load_jsonl(gt_path)
 
     # exp_name = ('-').join(submission_path.split('/')[-2].split('-')[:-1])
     # save_dir = os.path.join('evaluation', submission_path.split('/')[4])
@@ -556,8 +674,10 @@ if __name__ == "__main__":
 
     # compare_result(baseline, submission, gt, save_dir + '/compare')
 
-    exp_path = '/workspace/qd_detr/results/loss2/no_pt_detach_savepred-2024_02_25_07_21_17'
+    exp_path = '/workspace/qd_detr/results/loss2/temp_re-2024_03_27_07_39_41'
     exp_name = ('-').join(exp_path.split('/')[-1].split('-')[:-1])
     save_dir = os.path.join('visualize', exp_path.split('/')[4], exp_name)
 
-    chk_training_process(exp_path + '/submissions', save_dir + '/chk_training')
+    # chk_training_process(exp_path + '/submissions', save_dir + '/chk_training')
+
+    chk_similarity(exp_path, gt, '2', save_dir + '/chk_similarity')

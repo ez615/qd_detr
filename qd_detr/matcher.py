@@ -6,7 +6,7 @@ import torch
 from scipy.optimize import linear_sum_assignment
 from torch import nn
 import torch.nn.functional as F
-from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx
+from qd_detr.span_utils import generalized_temporal_iou, span_cxw_to_xx, S_Diff, S_GT_P, S_Q_P, temporal_iou
 
 
 class HungarianMatcher(nn.Module):
@@ -32,6 +32,40 @@ class HungarianMatcher(nn.Module):
         self.max_v_l = max_v_l
         self.foreground_label = 0
         assert cost_class != 0 or cost_span != 0 or cost_giou != 0, "all costs cant be 0"
+
+    def sim_iou(self, src_spans, tgt_spans, sizes, sim, durations): 
+        bsz = sim.shape[0]       
+        src_spans = src_spans.float()
+        tgt_spans = tgt_spans.float()
+
+        iou = torch.diag(temporal_iou(src_spans, tgt_spans)[0])
+
+        # src_span --> [batch_size * num_queries, 2]
+        # tgt_span --> [# of total spans, 2]
+        # return cost --> [batch_size * num_queries, # of total spans]
+        costs = []
+        for i, src in enumerate(src_spans):
+            b = i // bsz
+            l_clip = durations[b]
+            
+            st, end = torch.clamp(torch.round(src * l_clip), min=0, max=l_clip - 1).int()
+            v2v_sims = sim[b][st:end + 1]
+
+            cost = []
+            for tgt in tgt_spans:
+                st, end = torch.clamp(torch.round(tgt * l_clip), min=0, max=l_clip - 1).int()
+                v2v_sim = v2v_sims[:, st:end + 1]
+
+                cost.append(v2v_sim.flatten().mean())
+
+            cost = torch.stack(cost, 0)
+            costs.append(cost)
+        
+        costs = torch.stack(costs, 0)
+        # print(f'cost: {cost}\n')
+
+        return (1 - iou) * (1 - cost)
+            
 
     @torch.no_grad()
     def forward(self, outputs, targets):
@@ -77,6 +111,9 @@ class HungarianMatcher(nn.Module):
             # Compute the giou cost between spans
             # [batch_size * num_queries, total #spans in the batch]
             cost_giou = - generalized_temporal_iou(span_cxw_to_xx(out_spans), span_cxw_to_xx(tgt_spans))
+
+            ### ADDED
+            # cost_giou = - self.sim_iou(span_cxw_to_xx(span_cxw_to_xx(out_spans)), span_cxw_to_xx(tgt_spans), sizes, vid_feat, durations)
         else:
             pred_spans = outputs["pred_spans"]  # (bsz, #queries, max_v_l * 2)
             pred_spans = pred_spans.view(bs * num_queries, 2, self.max_v_l).softmax(-1)  # (bsz * #queries, 2, max_v_l)

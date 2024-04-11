@@ -91,6 +91,8 @@ class StartEndDataset(Dataset):
         if self.use_video:
             model_inputs["video_feat"] = self._get_video_feat_by_vid(meta["vid"])  # (Lv, Dv)
             ctx_l = len(model_inputs["video_feat"])
+            ### ADDED
+            # meta["ctx_l"] = ctx_l
         else:
             ctx_l = self.max_v_l
 
@@ -348,7 +350,6 @@ def start_end_collate(batch):
             # print(pad_data, mask_data)
             batched_data[k] = torch.tensor(pad_data, dtype=torch.float32)
             continue
-
         batched_data[k] = pad_sequences_1d(
             [e["model_inputs"][k] for e in batch], dtype=torch.float32, fixed_length=None)
     return batch_meta, batched_data
@@ -374,6 +375,5 @@ def prepare_batch_inputs(batched_model_inputs, device, non_blocking=False):
     if "saliency_all_labels" in batched_model_inputs:
         targets["saliency_all_labels"] = batched_model_inputs["saliency_all_labels"].to(device, non_blocking=non_blocking)
 
-    # targets["durations"] = [vid.shape[0] * 2 for vid in model_inputs["src_vid"]]
     targets = None if len(targets) == 0 else targets
     return model_inputs, targets

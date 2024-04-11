@@ -32,6 +32,7 @@ class BaseOptions(object):
         parser.add_argument("--total_iou_loss_coef", default=1, type=float,
                             help='during loss scheduling, coeff of sum of sim loss and giou loss')
         parser.add_argument("--save_pred", action="store_true")
+        parser.add_argument("--temp_factor", type=float, default=0.07)
 
 
         parser.add_argument("--dset_name", type=str, choices=["hl", 'tvsum'])
