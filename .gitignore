@@ -17,6 +17,7 @@ run_on_video/
 latest_hl*
 inference_hl*
 visualize/
+debug_results/
 
 # compiled files #
 *.pyc
