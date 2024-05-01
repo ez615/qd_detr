@@ -22,6 +22,8 @@ from standalone_eval.eval import eval_submission
 from utils.basic_utils import save_jsonl, save_json
 from utils.temporal_nms import temporal_nms
 
+import matplotlib.pyplot as plt
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -199,6 +201,7 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
         targets['durations'] = [b["duration"] // opt.clip_length for b in batch[0]] 
 
         outputs = model(**model_inputs)
+        attn_weights = outputs["attn_weights"]
         prob = F.softmax(outputs["pred_logits"], -1)  # (batch_size, #queries, #classes=2)
         if opt.span_loss_type == "l1":
             scores = prob[..., 0]  # * (batch_size, #queries)  foreground label is 0, we directly take it
@@ -218,7 +221,7 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
             pred_spans *= opt.clip_length
 
         # compose predictions
-        for idx, (meta, spans, score) in enumerate(zip(query_meta, pred_spans.cpu(), scores.cpu())):
+        for idx, (meta, spans, score, attn_weight) in enumerate(zip(query_meta, pred_spans.cpu(), scores.cpu(), attn_weights.cpu())):
             if opt.span_loss_type == "l1":
                 spans = span_cxw_to_xx(spans) * meta["duration"]
             # # (#queries, 3), [st(float), ed(float), score(float)]
@@ -234,6 +237,16 @@ def compute_mr_results(model, eval_loader, opt, epoch_i=None, criterion=None, tb
                 pred_saliency_scores=saliency_scores[idx]
             )
             mr_res.append(cur_query_pred)
+
+            # for visualization cross attention weights
+            # plt.figure(figsize=(10, 10))
+            # gt_span = [[wds[0] // 2, wds[1] // 2] for wds in meta["relevant_windows"]]
+            # pred_span = [max(0, cur_ranked_preds[0][0] // 2), min(75, cur_ranked_preds[0][1] // 2)]
+            # plt.title(f'query: {meta["query"]}\ngt: {gt_span}    pred: {pred_span}', wrap=True)
+            # plt.imshow(attn_weight.numpy(), interpolation='nearest')
+            # plt.tight_layout()
+            # plt.savefig(f'/workspace/qd_detr/visualize/crs_attn_weight_wo_sos/{meta["vid"]}_{meta["qid"]}.png')
+            # plt.close()
 
         if criterion:
             loss_dict = criterion(outputs, targets)

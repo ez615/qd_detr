@@ -84,7 +84,7 @@ class MultiheadAttention(Module):
     bias_k: Optional[torch.Tensor]
     bias_v: Optional[torch.Tensor]
 
-    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None):
+    def __init__(self, embed_dim, num_heads, dropout=0., bias=True, add_bias_kv=False, add_zero_attn=False, kdim=None, vdim=None, adaptive_temp=False):
         super(MultiheadAttention, self).__init__()
         self.embed_dim = embed_dim
         self.kdim = kdim if kdim is not None else embed_dim
@@ -107,6 +107,8 @@ class MultiheadAttention(Module):
         self.v_proj_weight = None
 
         self.add_zero_attn = add_zero_attn
+
+        self.adaptive_temp = adaptive_temp
 
         self._reset_parameters()
 
@@ -179,7 +181,7 @@ class MultiheadAttention(Module):
                 self.dropout, self.out_proj.weight, self.out_proj.bias,
                 training=self.training,
                 key_padding_mask=key_padding_mask, need_weights=need_weights,
-                attn_mask=attn_mask, out_dim=self.vdim)
+                attn_mask=attn_mask, out_dim=self.vdim, adaptive_temp=self.adaptive_temp)
 
 
 def multi_head_attention_forward(query: Tensor,
@@ -205,7 +207,8 @@ def multi_head_attention_forward(query: Tensor,
                                  v_proj_weight: Optional[Tensor] = None,
                                  static_k: Optional[Tensor] = None,
                                  static_v: Optional[Tensor] = None,
-                                 out_dim: Optional[Tensor] = None
+                                 out_dim: Optional[Tensor] = None,
+                                 adaptive_temp: bool = False
                                  ) -> Tuple[Tensor, Optional[Tensor]]:
     r"""
     Args:
@@ -357,7 +360,15 @@ def multi_head_attention_forward(query: Tensor,
         if key_padding_mask is not None:
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
+
     attn_output_weights = torch.bmm(q, k.transpose(1, 2))
+    if adaptive_temp:
+        # print(f'torch.norm(query.permute(1, 0, 2), dim=-1): {torch.norm(query.permute(1, 0, 2), dim=-1).shape}')
+        inv_temp = torch.norm(query.permute(1, 0, 2), dim=-1).mean(dim=-1, keepdim=True).unsqueeze(1).unsqueeze(2)
+        # print(f'inv_temp shape: {inv_temp.shape}\tattn_output_weights shape: {attn_output_weights.shape}')
+        attn_output_weights = attn_output_weights.view(bsz, num_heads, tgt_len, src_len) * inv_temp
+        attn_output_weights = attn_output_weights.view(bsz * num_heads, tgt_len, src_len)
+
     assert list(attn_output_weights.size()) == [bsz * num_heads, tgt_len, src_len]
 
     if attn_mask is not None:

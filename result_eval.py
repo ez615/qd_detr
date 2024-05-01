@@ -170,9 +170,13 @@ def result_evaluation(submission, gt, save_dir, exp_name):
 def window2clips(window, clip_len=2):
     return [int(window[0] / clip_len), int(window[1] / clip_len)]
 
-def video_visualization(submission, gt, save_dir, exp_name):
-    if not os.path.exists(f'./{save_dir}/visualize/{exp_name}'):
-        os.makedirs(f'./{save_dir}/visualize/{exp_name}')
+def video_visualization(submission, gt, save_dir):
+    print(f"Start submission visualization")
+
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    print(f'>> save path: {save_dir}')
 
     pred_gt_iou = compute_mr_r1(submission, gt)
 
@@ -183,8 +187,11 @@ def video_visualization(submission, gt, save_dir, exp_name):
         pred_st, pred_end = window2clips(d['pred_wds'])
         gt_st, gt_end = window2clips(d['gt_wds'])
 
-        pred_frames, gt_frames = video_loader.extract_clips(video_path=f'../val/{d["vid"]}.mp4', 
-                                pred_st=pred_st, pred_end=pred_end, gt_st=gt_st, gt_end=gt_end)
+        video_frames = video_loader.read_video_from_file(video_path=f'../val/{d["vid"]}.mp4')
+        video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
+
+        pred_frames = video_frames[pred_st:pred_end]
+        gt_frames = video_frames[gt_st:gt_end]
 
         pred_len, gt_len = len(pred_frames), len(gt_frames)
         max_len = max(pred_len, gt_len)
@@ -216,7 +223,7 @@ def video_visualization(submission, gt, save_dir, exp_name):
             axes[r][c].imshow(pred_frames[i])
             # axes[r][c].axis('off')
 
-        fig.savefig(f'./{save_dir}/visualize/{exp_name}/{d["iou"]}_{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
+        fig.savefig(f'./{save_dir}/{d["iou"]}_{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
         plt.close()
         ct += 1
 
@@ -237,41 +244,42 @@ def video_visualization_full(submission, gt, save_dir):
 
     ct = 0
     for d in tqdm(pred_gt_iou):
-        if d['iou'] == 0 or d['iou'] > 0.8:
-            vid_path = os.path.join("/workspace/val", d['vid'] + ".mp4")
-            video_frames = video_loader.read_video_from_file(video_path=vid_path)
-            video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
+        # if d['iou'] == 0 or d['iou'] > 0.8:
+        vid_path = os.path.join("/workspace/val", d['vid'] + ".mp4")
+        video_frames = video_loader.read_video_from_file(video_path=vid_path)
+        video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
 
-            vid_len = len(video_frames)
-            pred_st, pred_end = window2clips(d['pred_wds'])
-            gt_st, gt_end = window2clips(d['gt_wds'])
+        vid_len = len(video_frames)
+        pred_st, pred_end = window2clips(d['pred_wds'])
+        gt_st, gt_end = window2clips(d['gt_wds'])
 
-            n_rows, n_cols = 5, 15
-            fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+        n_rows, n_cols = 5, 15
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+        
+        fig.suptitle(f'Query: {d["query"]}')
+
+        for axis in axes.flatten():
+            axis.axis('off')
+        
+        for i in range(vid_len):
+            r = i // n_cols
+            c = i % n_cols
+
+            axes[r][c].set_title(str(i), fontsize=6)
+            if gt_st <= i < gt_end:
+                axes[r][c].text(0, 0, 'GT', fontsize=6, color='green')
+
+            axes[r][c].imshow(video_frames[i])
             
-            fig.suptitle(f'Query: {d["query"]}')
-
-            for axis in axes.flatten():
-                axis.axis('off')
+            # if pred_st <= i <= pred_end:
+            #     axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
+            #     axes[r][c].imshow(video_frames[i])
             
-            for i in range(vid_len):
-                r = i // n_cols
-                c = i % n_cols
-
-                axes[r][c].set_title(str(i), fontsize=6)
-                if gt_st <= i <= gt_end:
-                    axes[r][c].text(0, 0, 'GT', fontsize=6, color='green')
-                    axes[r][c].imshow(video_frames[i])
-                
-                if pred_st <= i <= pred_end:
-                    axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
-                    axes[r][c].imshow(video_frames[i])
-                
-                else:
-                    axes[r][c].imshow(video_frames[i], alpha=0.6)
-            
-            fig.savefig(f'{save_dir}/{d["iou"]}_{d["qid"]}_{d["vid"]}.png', bbox_inches='tight', pad_inches=0)
-            plt.close()
+            # else:
+            #     axes[r][c].imshow(video_frames[i], alpha=0.6)
+        
+        fig.savefig(f'{save_dir}/{d["vid"]}_{d["qid"]}.png', bbox_inches='tight', pad_inches=0)
+        plt.close()
 
 
 def similar_clip_eval(threshold=0.9):
@@ -614,7 +622,7 @@ def chk_similarity(exp, gt, loss_type, img_save_path, top_k=10):
             pred_st, pred_ed = window2clips(result_i['pred_wds'])
             pred_ed -= 1
 
-            gt_sim = sim[gt_st:gt_ed + 1, :]
+            gt_sim = sim[gt_st:gt_ed, :]
             indices = gt_sim.sort(descending=True)[1][:, :top_k]
             max_sims = gt_sim.max(dim=1)[0]
             # print(f'max_sims: {max_sims}\nmax: {max_sims.max().item()}\tmean:{max_sims.mean()}\tstd: {max_sims.std()}')
@@ -626,7 +634,7 @@ def chk_similarity(exp, gt, loss_type, img_save_path, top_k=10):
             n_rows, n_cols = max(indices.shape[0], 2), top_k + 1
             fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
             
-            fig.suptitle(f'Query: {result_i["query"]}\niou:  {result_i["iou"]:.4f}\ngt span: [{gt_st}, {gt_ed}]    pred_span: [{pred_st}, {pred_ed}]\nmax: {max_sims.max().item():.4f}    mean:{max_sims.mean():.4f}    std: {max_sims.std():.4f}')
+            fig.suptitle(f'Query: {result_i["query"]}\niou:  {result_i["iou"]:.4f}\ngt span: [{gt_st}, {gt_ed}]    pred_span: [{pred_st}, {pred_ed}]\nmax: {max_sims.max().item():.4f}    mean:{max_sims.mean():.4f}    std: {max_sims.std():.4f}\nCV: {max_sims.std() / max_sims.mean()}')
 
             for axis in axes.flatten():
                 axis.axis('off')
@@ -640,31 +648,144 @@ def chk_similarity(exp, gt, loss_type, img_save_path, top_k=10):
                     else:
                         indice = indices[r][c - 1]
                         axes[r][c].set_title(f'clip {indice}: {sim[gt_i, indice].item():.4f}', fontsize=6)
-                        if pred_st <= indice <= pred_ed:
-                            axes[r][c].imshow(video_frames[indice])
-                        else:
-                            axes[r][c].imshow(video_frames[indice], alpha=0.6)
+                        try:
+                            if pred_st <= indice < pred_ed:
+                                axes[r][c].imshow(video_frames[indice])
+                            else:
+                                axes[r][c].imshow(video_frames[indice], alpha=0.6)
+                        except:
+                            print(f'video_frames len:{len(video_frames)}\tindice: {indice}\ngt span: [{gt_st}, {gt_ed}]')
             
             fig.savefig(f'{img_save_path}/{result_i["iou"]:.4f}_{result_i["qid"]}.png', bbox_inches='tight', pad_inches=0)
             plt.close()
             
         break
+
+@torch.no_grad()
+def chk_self_sim(exp, gt, loss_type, img_save_path):
+    opt = TestOptions().parse()
+
+    opt.eval_split_name = 'val'
+    opt.eval_path = '/workspace/qd_detr/data/highlight_val_release.jsonl'
+    opt.resume = os.path.join(exp, 'model_best.ckpt')
+    opt.loss_type = loss_type
+
+    cudnn.benchmark = True
+    cudnn.deterministic = False
+
+    eval_dataset = StartEndDataset(
+        dset_name=opt.dset_name,
+        data_path=opt.eval_path,
+        v_feat_dirs=opt.v_feat_dirs,
+        q_feat_dir=opt.t_feat_dir,
+        q_feat_type="last_hidden_state",
+        max_q_l=opt.max_q_l,
+        max_v_l=opt.max_v_l,
+        ctx_mode=opt.ctx_mode,
+        data_ratio=opt.data_ratio,
+        normalize_v=not opt.no_norm_vfeat,
+        normalize_t=not opt.no_norm_tfeat,
+        clip_len=opt.clip_length,
+        max_windows=opt.max_windows,
+        load_labels=True,  # opt.eval_split_name == "val",
+        span_loss_type=opt.span_loss_type,
+        txt_drop_ratio=0,
+        dset_domain=opt.dset_domain,
+    )
+
+    model = setup_model(opt)[0]
+
+    eval_loader = DataLoader(
+        eval_dataset,
+        collate_fn=start_end_collate,
+        batch_size=opt.eval_bsz,
+        num_workers=opt.num_workers,
+        shuffle=False,
+        pin_memory=opt.pin_memory
+    )
+
+    video_loader = VideoLoader(framerate=1/2, size=224, centercrop=True)
+
+    print(f'\n>>> saved at {img_save_path}\n')
+    os.makedirs(img_save_path, exist_ok=True)
+
+    submission = load_jsonl(os.path.join(exp, 'best_hl_val_preds.jsonl'))
+    mr_result = compute_mr_r1(submission, gt, no_sorted=True)  # dict list
+
+    model.eval()
+
+    for i, (query_meta, batch) in enumerate(tqdm(eval_loader, desc="chk similarity")):
+        model_inputs, _ = prepare_batch_inputs(batch, opt.device, non_blocking=opt.pin_memory)
+
+        result_idx = i * opt.eval_bsz
+        result = mr_result[result_idx:result_idx + opt.eval_bsz]
+
+        sims = model.get_similarity_map(**model_inputs)[1]
+
+        # print(f'subm: {[d["qid"] for d in subm]}')
+        # print(f'meta: {[d["qid"] for d in query_meta]}')
+        for idx, sim in enumerate(tqdm(sims, desc='in batch')):
+            result_i = result[idx]
+
+            gt_st, gt_ed = window2clips(result_i['gt_wds'])
+            
+            pred_st, pred_ed = window2clips(result_i['pred_wds'])
+
+            self_sims = sim[gt_st:gt_ed, gt_st:gt_ed].diag()
+            cv = self_sims.std() / self_sims.mean()
+            # print(f'max_sims: {max_sims}\nmax: {max_sims.max().item()}\tmean:{max_sims.mean()}\tstd: {max_sims.std()}')
+
+            vid_path = f'/workspace/val/{result_i["vid"]}.mp4'
+            video_frames = video_loader.read_video_from_file(vid_path)
+            video_frames = video_frames.permute(0, 2, 3, 1) / 255.0
+            vid_len = len(video_frames)
+            
+            n_rows, n_cols = 5, math.ceil(vid_len / 5)
+            fig, axes = plt.subplots(n_rows, n_cols, figsize=(n_cols, n_rows), constrained_layout=True)
+            
+            fig.suptitle(f'Query: {result_i["query"]}\niou:  {result_i["iou"]:.4f}\nmean:{self_sims.mean():.4f}    std: {self_sims.std():.4f}\nCV: {cv}')
+
+            for axis in axes.flatten():
+                axis.axis('off')
+            
+            idx = 0
+            for j in range(vid_len):
+                r = j // n_cols
+                c = j % n_cols
+
+                axes[r][c].set_title(str(j), fontsize=6)
+                if gt_st <= j < gt_ed:
+                    axes[r][c].text(0, 0, f'GT    {self_sims[idx]:.4f}', fontsize=6, color='green')
+                    axes[r][c].imshow(video_frames[j])
+                    idx += 1
+                
+                if pred_st <= j <= pred_ed:
+                    axes[r][c].text(170, 0, 'Pred', fontsize=6, color='blue')
+                    axes[r][c].imshow(video_frames[j])
+                
+                else:
+                    axes[r][c].imshow(video_frames[j], alpha=0.6)
+            
+            fig.savefig(f'{img_save_path}/CV_{cv:.4f}_{result_i["iou"]:.4f}_{result_i["qid"]}.png', bbox_inches='tight', pad_inches=0)
+            plt.close()
+        
+        break
         
 if __name__ == "__main__":
     gt_path = '/workspace/qd_detr/data/highlight_val_release.jsonl'
-    submission_path = '/workspace/QD-DETR/results/loss0/no_pt_re-2024_01_11_08_44_41/best_hl_val_preds.jsonl'
+    submission_path = '/workspace/qd_detr/results/loss0/no_pt_re-2024_01_11_08_44_41/best_hl_val_preds.jsonl'
 
-    # submission = load_jsonl(submission_path)
+    submission = load_jsonl(submission_path)
     gt = load_jsonl(gt_path)
 
-    # exp_name = ('-').join(submission_path.split('/')[-2].split('-')[:-1])
+    exp_name = ('-').join(submission_path.split('/')[-2].split('-')[:-1])
     # save_dir = os.path.join('evaluation', submission_path.split('/')[4])
     
     # result_evaluation(submission, gt, save_dir, exp_name)
 
-    # save_dir = os.path.join('visualize', submission_path.split('/')[4], exp_name)
+    save_dir = os.path.join('visualize', submission_path.split('/')[4], exp_name)
 
-    # video_visualization_full(submission, gt, save_dir + '/submission')
+    video_visualization(submission, gt, save_dir + '/video_vis')
     # similar_clip_eval(0.6)
     # similar_clip_eval(0.8)
     # similar_clip_eval(0.9)
@@ -674,10 +795,11 @@ if __name__ == "__main__":
 
     # compare_result(baseline, submission, gt, save_dir + '/compare')
 
-    exp_path = '/workspace/qd_detr/results/loss2/temp_re-2024_03_27_07_39_41'
-    exp_name = ('-').join(exp_path.split('/')[-1].split('-')[:-1])
-    save_dir = os.path.join('visualize', exp_path.split('/')[4], exp_name)
+    # exp_path = '/workspace/qd_detr/results/loss2/temp_re-2024_03_27_07_39_41'
+    # exp_name = ('-').join(exp_path.split('/')[-1].split('-')[:-1])
+    # save_dir = os.path.join('visualize', exp_path.split('/')[4], exp_name)
 
     # chk_training_process(exp_path + '/submissions', save_dir + '/chk_training')
 
-    chk_similarity(exp_path, gt, '2', save_dir + '/chk_similarity')
+    # chk_similarity(exp_path, gt, '2', save_dir + '/chk_similarity_CV')
+    # chk_self_sim(exp_path, gt, '2', save_dir + '/chk_self_sim2')

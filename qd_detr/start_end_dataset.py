@@ -357,8 +357,8 @@ def start_end_collate(batch):
 
 def prepare_batch_inputs(batched_model_inputs, device, non_blocking=False):
     model_inputs = dict(
-        src_txt=batched_model_inputs["query_feat"][0].to(device, non_blocking=non_blocking),
-        src_txt_mask=batched_model_inputs["query_feat"][1].to(device, non_blocking=non_blocking),
+        src_txt=batched_model_inputs["query_feat"][0][:, 1:, :].to(device, non_blocking=non_blocking),
+        src_txt_mask=batched_model_inputs["query_feat"][1][:, 1:].to(device, non_blocking=non_blocking),
         src_vid=batched_model_inputs["video_feat"][0].to(device, non_blocking=non_blocking),
         src_vid_mask=batched_model_inputs["video_feat"][1].to(device, non_blocking=non_blocking),
     )
