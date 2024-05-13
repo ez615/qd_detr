@@ -779,7 +779,6 @@ if __name__ == "__main__":
     gt = load_jsonl(gt_path)
 
     exp_name = ('-').join(submission_path.split('/')[-2].split('-')[:-1])
-    # save_dir = os.path.join('evaluation', submission_path.split('/')[4])
     
     # result_evaluation(submission, gt, save_dir, exp_name)
 
